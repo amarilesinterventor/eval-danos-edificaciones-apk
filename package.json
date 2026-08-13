@@ -1,0 +1,23 @@
+{
+  "name": "eval-danos-edificaciones-apk",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Empaque Android (Capacitor) de la Herramienta de Evaluacion Rapida de Danos en Edificaciones -- envuelve la app web ya desplegada (D:/Claude/Inspeccion Estructural) sin modificarla, para producir un APK instalable que funciona sin conexion desde el primer arranque.",
+  "scripts": {
+    "sync-web": "node scripts/sync-web-assets.mjs",
+    "prepare-android": "npm run sync-web && npx cap sync android",
+    "open-android": "npx cap open android",
+    "build-apk": "npm run prepare-android && node scripts/build-apk.mjs",
+    "prepare-ios": "npm run sync-web && npx cap sync ios",
+    "open-ios": "npx cap open ios"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/core": "^8.5.0",
+    "@capacitor/ios": "^8.5.0"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^8.5.0"
+  }
+}

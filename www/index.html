@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<title>Panel — Herramienta de Evaluación Rápida de Daños en Edificaciones</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#2563eb" />
+<link rel="manifest" href="/manifest.json" />
+<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png" />
+<link rel="icon" href="/assets/icon.svg" type="image/svg+xml" />
+<link rel="stylesheet" href="/styles.css" />
+</head>
+<body class="bg-slate-50 min-h-screen">
+  <nav id="nav" class="bg-white border-b border-slate-200 sticky top-0 z-10"></nav>
+
+  <main class="max-w-6xl mx-auto px-4 py-6 pb-16">
+    <div class="flex items-start justify-between gap-3 mb-6">
+      <div>
+        <h1 class="text-xl sm:text-2xl font-semibold text-slate-800">Panel</h1>
+        <p class="text-sm text-slate-500 mt-0.5">Resumen de inspecciones de daños en edificaciones.</p>
+      </div>
+      <button id="newInspectionBtn" class="btn-primary shrink-0">+ Nueva inspección</button>
+    </div>
+
+    <div id="stats" class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8"></div>
+
+    <div id="habBreakdown" class="mb-8"></div>
+
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-base font-semibold text-slate-800">Últimas inspecciones</h2>
+      <a href="/inspections.html" class="text-sm text-brand-600 hover:underline">Ver todas →</a>
+    </div>
+    <div id="recentList" class="space-y-2"></div>
+
+    <div class="card p-4 sm:p-5 mt-8 flex flex-col sm:flex-row items-center gap-4">
+      <img src="/assets/qr-app.png" alt="Código QR con el enlace a esta herramienta" class="w-24 h-24 sm:w-28 sm:h-28 shrink-0 rounded-lg border border-slate-200" />
+      <div class="min-w-0 text-center sm:text-left">
+        <h2 class="text-sm font-semibold text-slate-800">Comparte esta herramienta con otros inspectores</h2>
+        <p class="text-xs text-slate-500 mt-0.5">Escanea el código QR o comparte el enlace para que cualquier inspector la abra directamente desde su celular — sin instalar nada ni crear cuenta.</p>
+        <div class="flex items-center gap-2 mt-2 justify-center sm:justify-start">
+          <code id="appShareUrl" class="text-xs bg-slate-100 text-slate-700 rounded px-2 py-1 break-all">https://eval-danos-edificaciones.onrender.com</code>
+          <button id="copyShareUrlBtn" type="button" class="btn-secondary text-xs px-2 py-1 shrink-0">Copiar</button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer id="footer"></footer>
+
+  <script src="/native-shim.js"></script>
+  <script src="/offline.js"></script>
+  <script src="/app.js"></script>
+  <script>
+    renderNav("home");
+    renderFooter();
+
+    async function load() {
+      const stats = await api("/dashboard/stats");
+
+      document.getElementById("stats").innerHTML = `
+        <div class="card p-4">
+          <div class="text-2xl font-semibold text-slate-800">${stats.total}</div>
+          <div class="text-xs text-slate-500 mt-1">Inspecciones totales</div>
+        </div>
+        <div class="card p-4">
+          <div class="text-2xl font-semibold text-slate-800">${(stats.byStatus.find((s) => s.status === "EN_PROCESO")?.n || 0) + (stats.byStatus.find((s) => s.status === "BORRADOR")?.n || 0)}</div>
+          <div class="text-xs text-slate-500 mt-1">Pendientes / en proceso</div>
+        </div>
+        <div class="card p-4">
+          <div class="text-2xl font-semibold text-slate-800">${stats.byStatus.find((s) => s.status === "FINALIZADA")?.n || 0}</div>
+          <div class="text-xs text-slate-500 mt-1">Finalizadas</div>
+        </div>
+        <div class="card p-4">
+          <div class="text-2xl font-semibold text-slate-800">${stats.totalPhotos}</div>
+          <div class="text-xs text-slate-500 mt-1">Fotografías registradas</div>
+        </div>
+      `;
+
+      const habOrder = ["ROJO", "AMARILLO", "VERDE"];
+      const habRows = habOrder
+        .map((code) => {
+          const n = stats.byHabitability.find((h) => h.habitability === code)?.n || 0;
+          return { code, n };
+        })
+        .filter((r) => r.n > 0);
+      document.getElementById("habBreakdown").innerHTML = habRows.length
+        ? `<h2 class="text-base font-semibold text-slate-800 mb-3">Clasificación de habitabilidad</h2>
+           <div class="flex flex-wrap gap-3">
+             ${habRows.map((r) => `<div class="card px-4 py-3 flex items-center gap-3">${habitabilityBadge(r.code)}<span class="text-lg font-semibold text-slate-800">${r.n}</span></div>`).join("")}
+           </div>`
+        : "";
+
+      const listEl = document.getElementById("recentList");
+      if (!stats.recent.length) {
+        listEl.innerHTML = `<div class="card p-8 text-center text-sm text-slate-500">Aún no hay inspecciones registradas. Usa "+ Nueva inspección" para empezar.</div>`;
+        return;
+      }
+      listEl.innerHTML = stats.recent
+        .map(
+          (i) => `
+        <a href="/inspection.html?id=${i.id}" class="card p-4 flex items-center justify-between gap-3 hover:shadow-md transition block">
+          <div class="min-w-0">
+            <div class="font-medium text-slate-800 truncate">${escapeHtml(i.building_name || i.form_number || "Inspección sin nombre")}</div>
+            <div class="text-xs text-slate-500 mt-0.5 truncate">${escapeHtml(i.address || "")} ${i.municipality ? "· " + escapeHtml(i.municipality) : ""} ${i.department ? ", " + escapeHtml(i.department) : ""}</div>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            ${habitabilityBadge(i.habitability)}
+            ${statusBadge(i.status)}
+          </div>
+        </a>
+      `,
+        )
+        .join("");
+    }
+
+    document.getElementById("copyShareUrlBtn").addEventListener("click", async () => {
+      const btn = document.getElementById("copyShareUrlBtn");
+      const url = document.getElementById("appShareUrl").textContent;
+      try {
+        await navigator.clipboard.writeText(url);
+        const original = btn.textContent;
+        btn.textContent = "¡Copiado!";
+        setTimeout(() => (btn.textContent = original), 1500);
+      } catch {
+        // Sin permiso de portapapeles (p.ej. http sin TLS): el enlace ya está visible para copiar a mano.
+      }
+    });
+
+    document.getElementById("newInspectionBtn").addEventListener("click", async () => {
+      const btn = document.getElementById("newInspectionBtn");
+      btn.disabled = true;
+      const id = window.newClientId();
+      try {
+        await api("/inspections", { method: "POST", body: JSON.stringify({ id }) });
+      } catch (err) {
+        // Si falla por red, api() ya la encoló offline con este mismo id — igual navegamos.
+      }
+      window.location.href = `/inspection.html?id=${id}`;
+    });
+
+    load();
+  </script>
+</body>
+</html>

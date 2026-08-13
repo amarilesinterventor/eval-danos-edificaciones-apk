@@ -1,0 +1,1053 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<title>Inspección — Herramienta de Evaluación Rápida de Daños en Edificaciones</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#2563eb" />
+<link rel="manifest" href="/manifest.json" />
+<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png" />
+<link rel="icon" href="/assets/icon.svg" type="image/svg+xml" />
+<link rel="stylesheet" href="/styles.css" />
+</head>
+<body class="bg-slate-50 min-h-screen pb-24">
+  <nav id="nav" class="bg-white border-b border-slate-200 sticky top-0 z-10"></nav>
+
+  <div id="stepBar" class="bg-white border-b border-slate-200 sticky top-[57px] z-10"></div>
+
+  <main class="max-w-3xl mx-auto px-4 py-6">
+    <div id="stepContent"></div>
+  </main>
+
+  <div id="footerNav" class="fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 z-20">
+    <div class="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
+      <button id="prevBtn" class="btn-secondary">← Atrás</button>
+      <span id="saveStatus" class="text-xs text-slate-400 flex-1 text-center"></span>
+      <button id="nextBtn" class="btn-primary">Siguiente →</button>
+    </div>
+  </div>
+
+  <!-- Modal: agregar daño individual (extensión — foto + descripción) -->
+  <div id="damageModal" class="fixed inset-0 bg-black/30 hidden items-center justify-center p-4 z-30">
+    <div class="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
+      <h2 class="text-lg font-semibold text-slate-800 mb-1">Detalle del daño</h2>
+      <p id="damageModalElement" class="text-sm text-slate-500 mb-4"></p>
+      <form id="damageForm" class="space-y-3">
+        <div>
+          <label class="field-label">Ubicación específica</label>
+          <input name="location" class="field-input" placeholder="p.ej. Fachada norte, piso 3" />
+        </div>
+        <div>
+          <label class="field-label">Tipo de daño</label>
+          <div class="flex gap-2">
+            <input name="damageType" id="damageTypeInput" class="field-input" placeholder="p.ej. Fisuras diagonales" />
+            <button type="button" id="damageTypePickBtn" class="chip-btn border-2 border-brand-600 bg-white text-brand-700 shrink-0 !px-3.5 whitespace-nowrap">🔍 Elegir</button>
+          </div>
+        </div>
+        <div>
+          <label class="field-label">Descripción</label>
+          <textarea name="description" class="field-input" rows="2"></textarea>
+        </div>
+        <div>
+          <label class="field-label">Extensión aproximada</label>
+          <input name="extent" class="field-input" placeholder="p.ej. 2 m de longitud" />
+        </div>
+        <div>
+          <label class="field-label">Recomendación</label>
+          <input name="recommendation" class="field-input" placeholder="Se completa automáticamente, editable" />
+        </div>
+        <div>
+          <label class="field-label">Fotografías</label>
+          <div id="damagePhotos"></div>
+          <div class="flex gap-2 mt-2">
+            <button type="button" id="damagePhotoBtn" class="chip-btn border-2 border-slate-400 bg-white text-slate-800">📷 Tomar / elegir foto</button>
+          </div>
+          <input type="file" accept="image/*" capture="environment" id="damagePhotoInput" class="hidden" />
+          <p class="text-xs text-slate-400 mt-1.5">Las fotos se suben al guardar el daño — puedes agregar varias antes de guardar.</p>
+        </div>
+        <div class="flex justify-end gap-2 pt-2">
+          <button type="button" id="damageCancelBtn" class="btn-secondary">Cerrar</button>
+          <button type="submit" id="damageSubmitBtn" class="btn-primary">Guardar daño</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: guía visual de patologías/fisuras por elemento -->
+  <div id="guideModal" class="fixed inset-0 bg-black/30 hidden items-center justify-center p-4 z-30">
+    <div class="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 max-h-[85vh] overflow-y-auto">
+      <h2 class="text-lg font-semibold text-slate-800 mb-1">Guía de patologías</h2>
+      <p id="guideModalElement" class="text-sm text-slate-500 mb-4"></p>
+      <div id="guideModalContent" class="space-y-2"></div>
+      <div id="guideOtherRow" class="hidden mt-3 pt-3 border-t border-slate-100">
+        <label class="field-label">Otro (especificar)</label>
+        <div class="flex gap-2">
+          <input type="text" id="guideOtherInput" class="field-input" placeholder="Describe el tipo de daño..." />
+          <button type="button" id="guideOtherBtn" class="chip-btn border-2 border-brand-600 bg-brand-600 text-white shrink-0">Usar</button>
+        </div>
+      </div>
+      <p class="text-[11px] text-slate-400 mt-4 leading-relaxed">Ilustraciones de referencia elaboradas para esta herramienta a partir de los mecanismos de falla descritos en la <em>Guía de Patologías Constructivas, Estructurales y No Estructurales</em> (FOPAE - AIS, 3ª edición, 2011).</p>
+      <div class="flex justify-end mt-4">
+        <button type="button" id="guideCloseBtn" class="btn-secondary">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/native-shim.js"></script>
+  <script src="/offline.js"></script>
+  <script src="/colombia.js"></script>
+  <script src="/pathology-guide.js"></script>
+  <script src="/app.js"></script>
+  <script>
+    renderNav("inspections");
+
+    const inspectionId = new URLSearchParams(location.search).get("id");
+    if (!inspectionId) window.location.href = "/inspections.html";
+
+    let catalog = null;
+    let inspection = null;
+    let currentStep = Number(new URLSearchParams(location.search).get("step")) || 1;
+
+    const STEPS = [
+      { n: 1, title: "Identificación", render: renderStep1, save: saveStep1 },
+      { n: 2, title: "Ubicación", render: renderStep2, save: saveStep2 },
+      { n: 3, title: "Edificación", render: renderStep3, save: saveStep3 },
+      { n: 4, title: "Condiciones", render: renderStep4, save: saveStep4 },
+      { n: 5, title: "Daños", render: renderStep5, save: async () => {} },
+      { n: 6, title: "Esquema y clasif.", render: renderStep6, save: saveStep6 },
+      { n: 7, title: "Recomendaciones", render: renderStep7, save: saveStep7 },
+      { n: 8, title: "Finalizar", render: renderStep8, save: saveStep8 },
+    ];
+
+const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], damageRecords: [], photos: [], threatTypes: [], buildingUses: [], structuralSystems: [], floorSystems: [], roofSupportSystems: [], roofTypes: [], safetyRecommendations: [] });
+
+    const BLANK_CATALOG_STUB = () => ({
+      threatTypes: [], buildingUses: [], structuralSystems: [], floorSystems: [], roofSupportSystems: [],
+      roofTypes: [], siteMorphology: [], structuralElements: [], nonStructuralElements: [],
+      safetyRecommendations: [], habitabilityMeta: {}, damageLevelMeta: {},
+    });
+    /**
+     * Recarga catálogo + inspección. NUNCA debe lanzar: se llama desde varios
+     * sitios como `await loadAll()` sin su propio try/catch (goToStep, el
+     * click de severidad, etc.), y el paso siguiente de esas cadenas siempre
+     * es volver a dibujar la pantalla. Antes de esta corrección, la carga del
+     * catálogo no tenía manejo de error — si esa llamada fallaba (p.ej. una
+     * interrupción de red pasajera), la excepción se propagaba sin capturar,
+     * cortaba la cadena `guardar -> recargar -> redibujar` a la mitad, y la
+     * pantalla se quedaba mostrando el estado viejo sin ningún aviso (bug
+     * real detectado en campo: el dato sí llegaba a guardarse en el
+     * servidor, pero nada en la pantalla lo reflejaba). Ver
+     * docs/ANALISIS-Y-ARQUITECTURA.md para el detalle del diagnóstico.
+     */
+    async function loadAll() {
+      try {
+        catalog = await api("/catalog");
+      } catch (err) {
+        // El catálogo es una lista estática (tipos de amenaza, usos, etc.)
+        // que casi nunca cambia entre una carga y la siguiente — ante una
+        // falla puntual, es más seguro seguir con la última copia que sí
+        // cargó bien (o un catálogo vacío si nunca cargó ninguna) que dejar
+        // que el error interrumpa el resto de la función.
+        if (!catalog) catalog = BLANK_CATALOG_STUB();
+      }
+      try {
+        const res = await api(`/inspections/${inspectionId}`);
+        inspection = res.inspection || BLANK_INSPECTION_STUB();
+      } catch (err) {
+        // `api()` lanza en cualquier respuesta no-OK, incluyendo 404 — que es
+        // exactamente lo que devuelve el servidor tanto si la inspección se
+        // creó offline y aún no se sincronizó (caso esperado, no es un error)
+        // como si el registro fue eliminado de verdad. No podemos distinguir
+        // los dos casos desde el cliente; se opta por el fallback tolerante
+        // (permitir seguir trabajando) en vez de dejar la página en blanco.
+        inspection = BLANK_INSPECTION_STUB();
+      }
+    }
+
+    function setSaveStatus(text) {
+      const el = document.getElementById("saveStatus");
+      el.textContent = text;
+      if (text) setTimeout(() => { if (el.textContent === text) el.textContent = ""; }, 2500);
+    }
+
+    function renderStepBar() {
+      const el = document.getElementById("stepBar");
+      const pct = Math.round((currentStep / STEPS.length) * 100);
+      el.innerHTML = `
+        <div class="max-w-3xl mx-auto px-4 py-2.5">
+          <div class="flex items-center justify-between text-xs text-slate-500 mb-1.5">
+            <span>Paso ${currentStep} de ${STEPS.length}: <strong class="text-slate-700">${STEPS[currentStep - 1].title}</strong></span>
+            <span>${pct}%</span>
+          </div>
+          <div class="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+            <div class="h-full bg-brand-600 rounded-full transition-all" style="width:${pct}%"></div>
+          </div>
+          <div class="flex gap-1.5 mt-2.5 overflow-x-auto pb-0.5">
+            ${STEPS.map(
+              (s) => `<button class="step-jump-btn shrink-0 text-[11px] px-2.5 py-1 rounded-full border ${s.n === currentStep ? "border-brand-500 bg-brand-50 text-brand-700 font-medium" : "border-slate-200 text-slate-400"}" data-step="${s.n}">${String(s.n).padStart(2, "0")}</button>`,
+            ).join("")}
+          </div>
+        </div>
+      `;
+      el.querySelectorAll(".step-jump-btn").forEach((btn) => btn.addEventListener("click", () => goToStep(Number(btn.dataset.step))));
+    }
+
+    function renderFooterButtons() {
+      document.getElementById("prevBtn").disabled = currentStep === 1;
+      document.getElementById("nextBtn").textContent = currentStep === STEPS.length ? "Finalizar →" : "Guardar y continuar →";
+    }
+
+    async function goToStep(n, { skipSave = false } = {}) {
+      if (!skipSave) {
+        setSaveStatus("Guardando…");
+        try {
+          await STEPS[currentStep - 1].save();
+          setSaveStatus("Guardado");
+        } catch (err) {
+          setSaveStatus("No se pudo guardar: " + err.message);
+        }
+        await loadAll();
+      }
+      currentStep = Math.min(Math.max(n, 1), STEPS.length);
+      history.replaceState(null, "", `?id=${inspectionId}&step=${currentStep}`);
+      renderStepBar();
+      renderFooterButtons();
+      window.scrollTo({ top: 0, behavior: "instant" in window ? "instant" : "auto" });
+      STEPS[currentStep - 1].render(document.getElementById("stepContent"));
+    }
+
+    document.getElementById("prevBtn").addEventListener("click", () => goToStep(currentStep - 1));
+    document.getElementById("nextBtn").addEventListener("click", () => {
+      if (currentStep === STEPS.length) {
+        finishInspection();
+        return;
+      }
+      goToStep(currentStep + 1);
+    });
+
+    /** Botón "Finalizar →" del paso 8: guarda, marca la inspección como finalizada y vuelve al panel. */
+    async function finishInspection() {
+      const btn = document.getElementById("nextBtn");
+      btn.disabled = true;
+      btn.textContent = "Guardando…";
+      try {
+        await STEPS[currentStep - 1].save();
+        await api(`/inspections/${inspectionId}/status`, { method: "POST", body: JSON.stringify({ status: "FINALIZADA" }) });
+      } catch (err) {
+        alert("No se pudo finalizar la inspección: " + err.message);
+        btn.disabled = false;
+        btn.textContent = "Finalizar →";
+        return;
+      }
+      window.location.href = "/index.html";
+    }
+
+    // ---------------------------------------------------------------------
+    // Helpers de formulario
+    // ---------------------------------------------------------------------
+    function cleanPayload(payload, groupNames = []) {
+      const out = { ...payload };
+      for (const key of Object.keys(out)) {
+        if (groupNames.some((n) => key === n || key.startsWith(n + "Other__"))) delete out[key];
+      }
+      return out;
+    }
+    function formPayload() {
+      const form = document.getElementById("stepForm");
+      return Object.fromEntries(new FormData(form).entries());
+    }
+    async function patchInspection(fields) {
+      if (Object.keys(fields).length === 0) return;
+      await api(`/inspections/${inspectionId}`, { method: "PATCH", body: JSON.stringify(fields) });
+    }
+    function sectionCard(title, innerHtml, subtitle) {
+      return `<div class="card p-5 mb-4">
+        <h2 class="text-base font-semibold text-slate-800">${title}</h2>
+        ${subtitle ? `<p class="text-xs text-slate-500 mt-0.5 mb-3">${subtitle}</p>` : '<div class="mb-3"></div>'}
+        ${innerHtml}
+      </div>`;
+    }
+    function field(labelText, inputHtml) {
+      return `<div class="mb-4"><label class="field-label">${labelText}</label>${inputHtml}</div>`;
+    }
+
+    // ===========================================================================
+    // PASO 1 — Identificación de la evaluación (sección 1)
+    // ===========================================================================
+    function renderStep1(container) {
+      const i = inspection;
+      container.innerHTML = `<form id="stepForm">
+        ${sectionCard("1. Identificación de la evaluación", `
+          <div class="grid grid-cols-2 gap-3">
+            ${field("No. del formulario", `<input name="formNumber" class="field-input" value="${escapeHtml(i.form_number || "")}" />`)}
+            ${field("ID Zona", `<input name="zoneId" class="field-input" value="${escapeHtml(i.zone_id || "")}" />`)}
+          </div>
+          ${field("Nombre del evaluador *", `<input name="evaluatorName" required class="field-input" value="${escapeHtml(i.evaluator_name || getLastEvaluatorName())}" />`)}
+          <div class="grid grid-cols-3 gap-3">
+            ${field("Fecha", `<input type="date" name="inspectionDate" class="field-input" value="${escapeHtml(i.inspection_date || "")}" />`)}
+            ${field("Hora", `<input type="time" name="inspectionTime" class="field-input" value="${escapeHtml(i.inspection_time || "")}" />`)}
+            <div class="mb-4"><label class="field-label">&nbsp;</label>${chipRadio("inspectionTimePeriod", [{ value: "am", label: "AM" }, { value: "pm", label: "PM" }], i.inspection_time_period)}</div>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            ${field("ID Grupo", `<input name="groupId" class="field-input" value="${escapeHtml(i.group_id || "")}" />`)}
+            ${field("Entidad", `<input name="entity" class="field-input" value="${escapeHtml(i.entity || "")}" />`)}
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            ${field("Persona de contacto", `<input name="contactPerson" class="field-input" value="${escapeHtml(i.contact_person || "")}" />`)}
+            ${field("Núm. de contacto", `<input name="contactPhone" type="tel" class="field-input" value="${escapeHtml(i.contact_phone || "")}" />`)}
+          </div>
+          ${field("Tipo de inspección", chipRadio("inspectionType", [{ value: "EXTERIOR", label: "Exterior solamente" }, { value: "COMPLETA", label: "Completa" }], i.inspection_type, { cols: 2 }))}
+        `)}
+        ${sectionCard("Tipo de amenaza", `<div id="threatTypesGroup">${checkboxGroup("threatTypes", catalog.threatTypes, i.threatTypes.map((t) => t.code), Object.fromEntries(i.threatTypes.map((t) => [t.code, t.otherText])))}</div>`, "Selecciona todas las que apliquen.")}
+        ${sectionCard("Víctimas y afectación humana", `
+          <div class="grid grid-cols-2 gap-3">
+            ${field("Muertos", `<input name="numDeaths" type="number" min="0" inputmode="numeric" class="field-input" value="${i.num_deaths ?? ""}" />`)}
+            ${field("Heridos", `<input name="numInjured" type="number" min="0" inputmode="numeric" class="field-input" value="${i.num_injured ?? ""}" />`)}
+            ${field("Desaparecidos", `<input name="numMissing" type="number" min="0" inputmode="numeric" class="field-input" value="${i.num_missing ?? ""}" />`)}
+            ${field("Damnificados", `<input name="numAffected" type="number" min="0" inputmode="numeric" class="field-input" value="${i.num_affected ?? ""}" />`)}
+          </div>
+          ${field("Observaciones sobre víctimas", `<textarea name="victimsNotes" rows="2" class="field-input">${escapeHtml(i.victims_notes || "")}</textarea>`)}
+        `, "Deja en blanco los campos que no apliquen — no todas las inspecciones tienen víctimas que reportar.")}
+      </form>`;
+      bindChipRadio(container);
+      bindCheckboxGroup(container);
+    }
+    async function saveStep1() {
+      const payload = cleanPayload(formPayload(), ["threatTypes"]);
+      payload.inspectionTimePeriod = chipRadioValue(document, "inspectionTimePeriod");
+      payload.inspectionType = chipRadioValue(document, "inspectionType");
+      rememberEvaluatorName(payload.evaluatorName);
+      await patchInspection(payload);
+      await api(`/inspections/${inspectionId}/threat-types`, { method: "PUT", body: JSON.stringify({ items: readCheckboxGroup(document, "threatTypes") }) });
+    }
+
+    // ===========================================================================
+    // PASO 2 — Información general / ubicación (sección 3)
+    // ===========================================================================
+    function renderStep2(container) {
+      const i = inspection;
+      container.innerHTML = `<form id="stepForm">
+        ${sectionCard("3. Información general — Localización", `
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3" id="deptCityFields"></div>
+          ${field("Barrio / Vereda", `<input name="neighborhood" class="field-input" value="${escapeHtml(i.neighborhood || "")}" />`)}
+          ${field("Zona", chipRadio("areaType", [{ value: "URBANO", label: "Urbano" }, { value: "RURAL", label: "Rural" }], i.area_type, { cols: 2 }))}
+        `)}
+        ${sectionCard("Coordenadas GPS (WGS84)", `
+          <button type="button" id="gpsBtn" class="btn-secondary w-full mb-3">📍 Obtener ubicación GPS actual</button>
+          <div id="gpsMsg" class="text-xs text-slate-500 mb-3"></div>
+          <div class="grid grid-cols-2 gap-3">
+            ${field("Latitud", `<input name="latitude" id="latInput" type="number" step="any" class="field-input" value="${i.latitude ?? ""}" />`)}
+            ${field("Longitud", `<input name="longitude" id="lngInput" type="number" step="any" class="field-input" value="${i.longitude ?? ""}" />`)}
+          </div>
+          <input type="hidden" name="locationSource" id="locationSourceInput" value="${i.location_source || ""}" />
+          <div id="mapPreview"></div>
+        `, "Si el GPS no está disponible, introduce las coordenadas manualmente.")}
+      </form>`;
+      document.getElementById("deptCityFields").innerHTML = departmentCityFields(i.department || "", i.municipality || "");
+      bindDepartmentCityFields(document.getElementById("deptCityFields"), i.municipality || "");
+      bindChipRadio(container);
+      renderMapPreview(i.latitude, i.longitude);
+
+      document.getElementById("gpsBtn").addEventListener("click", async () => {
+        const btn = document.getElementById("gpsBtn");
+        const msg = document.getElementById("gpsMsg");
+        btn.disabled = true;
+        msg.textContent = "Obteniendo ubicación…";
+        try {
+          const pos = await getGpsLocation();
+          document.getElementById("latInput").value = pos.latitude;
+          document.getElementById("lngInput").value = pos.longitude;
+          document.getElementById("locationSourceInput").value = "GPS";
+          msg.textContent = `Ubicación obtenida (precisión ≈ ${Math.round(pos.accuracy)} m).`;
+          renderMapPreview(pos.latitude, pos.longitude);
+        } catch (err) {
+          msg.textContent = err.message;
+        } finally {
+          btn.disabled = false;
+        }
+      });
+      ["latInput", "lngInput"].forEach((id) =>
+        document.getElementById(id).addEventListener("input", () => {
+          document.getElementById("locationSourceInput").value = "MANUAL";
+          renderMapPreview(document.getElementById("latInput").value, document.getElementById("lngInput").value);
+        }),
+      );
+    }
+    function renderMapPreview(lat, lng) {
+      const el = document.getElementById("mapPreview");
+      if (!el) return;
+      const la = Number(lat), lo = Number(lng);
+      if (!lat || !lng || Number.isNaN(la) || Number.isNaN(lo)) {
+        el.innerHTML = `<p class="text-xs text-slate-400 mt-2">Sin coordenadas aún.</p>`;
+        return;
+      }
+      const d = 0.004;
+      const bbox = [lo - d, la - d, lo + d, la + d].join("%2C");
+      el.innerHTML = `
+        <div class="rounded-xl overflow-hidden border border-slate-200 mt-1">
+          <iframe class="w-full h-48" loading="lazy" src="https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&marker=${la}%2C${lo}&layer=mapnik"></iframe>
+        </div>
+        <a href="https://www.openstreetmap.org/?mlat=${la}&mlon=${lo}#map=17/${la}/${lo}" target="_blank" rel="noopener" class="text-xs text-brand-600 hover:underline">Ver mapa más grande →</a>
+      `;
+    }
+    async function saveStep2() {
+      const payload = formPayload();
+      await patchInspection(payload);
+    }
+
+    // ===========================================================================
+    // PASO 3 — Identificación de la edificación + sistema estructural (sec. 4-5)
+    // ===========================================================================
+    function renderStep3(container) {
+      const i = inspection;
+      container.innerHTML = `<form id="stepForm">
+        ${sectionCard("4. Identificación de la edificación", `
+          ${field("Dirección", `<input name="address" class="field-input" value="${escapeHtml(i.address || "")}" />`)}
+          ${field("Nombre de la edificación", `<input name="buildingName" class="field-input" value="${escapeHtml(i.building_name || "")}" />`)}
+          <div class="mb-4"><label class="field-label">Uso de la edificación</label>${checkboxGroup("buildingUses", catalog.buildingUses, i.buildingUses.map((u) => u.code), Object.fromEntries(i.buildingUses.map((u) => [u.code, u.otherText])))}</div>
+          <div class="grid grid-cols-2 gap-3">
+            ${field("Núm. pisos sobre el suelo", `<input name="floorsAboveGround" type="number" min="0" class="field-input" value="${i.floors_above_ground ?? ""}" />`)}
+            ${field("Núm. sótanos", `<input name="basements" type="number" min="0" class="field-input" value="${i.basements ?? ""}" />`)}
+          </div>
+          ${field("Tipo de edificación", chipRadio("buildingOwnership", [{ value: "PUBLICA", label: "Pública" }, { value: "PRIVADA", label: "Privada" }], i.building_ownership, { cols: 2 }))}
+          <div class="grid grid-cols-2 gap-3">
+            ${field("Frente (m)", `<input name="frontDimension" type="number" step="any" min="0" class="field-input" value="${i.front_dimension ?? ""}" />`)}
+            ${field("Fondo (m)", `<input name="depthDimension" type="number" step="any" min="0" class="field-input" value="${i.depth_dimension ?? ""}" />`)}
+          </div>
+        `)}
+        ${sectionCard("5.1 Sistema estructural", checkboxGroup("structuralSystems", catalog.structuralSystems, i.structuralSystems.map((s) => s.code), Object.fromEntries(i.structuralSystems.map((s) => [s.code, s.otherText]))))}
+        ${sectionCard("5.2 Sistema de entrepiso", checkboxGroup("floorSystems", catalog.floorSystems, i.floorSystems.map((s) => s.code), Object.fromEntries(i.floorSystems.map((s) => [s.code, s.otherText]))))}
+        ${sectionCard("5.3 Sistema de soporte de la cubierta", checkboxGroup("roofSupportSystems", catalog.roofSupportSystems, i.roofSupportSystems.map((s) => s.code), Object.fromEntries(i.roofSupportSystems.map((s) => [s.code, s.otherText]))))}
+        ${sectionCard("5.4 Tipo de cubierta", checkboxGroup("roofTypes", catalog.roofTypes, i.roofTypes.map((s) => s.code), Object.fromEntries(i.roofTypes.map((s) => [s.code, s.otherText]))))}
+      </form>`;
+      bindChipRadio(container);
+      bindCheckboxGroup(container);
+    }
+    async function saveStep3() {
+      const groups = ["buildingUses", "structuralSystems", "floorSystems", "roofSupportSystems", "roofTypes"];
+      const payload = cleanPayload(formPayload(), groups);
+      payload.buildingOwnership = chipRadioValue(document, "buildingOwnership");
+      await patchInspection(payload);
+      await api(`/inspections/${inspectionId}/building-uses`, { method: "PUT", body: JSON.stringify({ items: readCheckboxGroup(document, "buildingUses") }) });
+      await api(`/inspections/${inspectionId}/structural-systems`, { method: "PUT", body: JSON.stringify({ items: readCheckboxGroup(document, "structuralSystems") }) });
+      await api(`/inspections/${inspectionId}/floor-systems`, { method: "PUT", body: JSON.stringify({ items: readCheckboxGroup(document, "floorSystems") }) });
+      await api(`/inspections/${inspectionId}/roof-support-systems`, { method: "PUT", body: JSON.stringify({ items: readCheckboxGroup(document, "roofSupportSystems") }) });
+      await api(`/inspections/${inspectionId}/roof-types`, { method: "PUT", body: JSON.stringify({ items: readCheckboxGroup(document, "roofTypes") }) });
+    }
+
+    // ===========================================================================
+    // PASO 4 — Condiciones preexistentes / peligro global / geotécnico (sec 6-8)
+    // ===========================================================================
+    function yesNo(name, value, cols = 2) {
+      return chipRadio(name, [{ value: "SI", label: "Sí" }, { value: "NO", label: "No" }], value, { cols });
+    }
+    function yesNoUnclear(name, value) {
+      return chipRadio(name, [{ value: "SI", label: "Sí" }, { value: "NO", label: "No" }, { value: "NO_ES_CLARO", label: "No es claro" }], value, { cols: 3 });
+    }
+    function renderStep4(container) {
+      const i = inspection;
+      const isSismo = (i.threatTypes || []).some((t) => t.code === "SISMO");
+      container.innerHTML = `<form id="stepForm">
+        ${sectionCard("6.1 Morfología del sitio", `<div id="morphField"></div>`)}
+        ${sectionCard("6.2 Amenaza por cuerpos hídricos afectados", `
+          ${field("¿Amenaza por cuerpos hídricos?", chipRadio("waterBodyThreat", [{ value: "1", label: "Sí" }, { value: "0", label: "No" }], i.water_body_threat == null ? null : String(i.water_body_threat), { cols: 2 }))}
+          <div class="grid grid-cols-1 gap-3">
+            ${field("Distancia aprox. (m)", `<input name="waterBodyDistance" type="number" step="any" min="0" class="field-input" value="${i.water_body_distance ?? ""}" />`)}
+            ${field("Observaciones", `<input name="waterBodyNotes" class="field-input" value="${escapeHtml(i.water_body_notes || "")}" />`)}
+          </div>
+        `)}
+        ${
+          isSismo
+            ? sectionCard("Solo si la evaluación de daños es por sismo", `
+              ${field("6.3 ¿Hay piso débil?", chipRadio("weakStory", [{ value: "1", label: "Sí" }, { value: "0", label: "No" }], i.weak_story == null ? null : String(i.weak_story), { cols: 2 }))}
+              ${field("6.4 ¿Hay piso con columna corta?", chipRadio("shortColumn", [{ value: "1", label: "Sí" }, { value: "0", label: "No" }], i.short_column == null ? null : String(i.short_column), { cols: 2 }))}
+              ${field("6.5 ¿Hay cambios drásticos de rigidez?", chipRadio("stiffnessChange", [{ value: "1", label: "Sí" }, { value: "0", label: "No" }], i.stiffness_change == null ? null : String(i.stiffness_change), { cols: 2 }))}
+            `)
+            : ""
+        }
+        ${sectionCard("7. Peligro global", `
+          ${field("Colapso total", yesNo("totalCollapse", i.total_collapse))}
+          ${field("Colapso parcial", yesNoUnclear("partialCollapse", i.partial_collapse))}
+          ${field("Inclinación evidente", yesNo("evidentTilt", i.evident_tilt))}
+          ${field("Riesgo por edificaciones adyacentes", yesNoUnclear("adjacentBuildingRisk", i.adjacent_building_risk))}
+        `)}
+        ${sectionCard("8. Peligro por condiciones geotécnicas", `
+          ${field("Licuación, asentamiento o subsidencia del terreno", yesNo("soilLiquefaction", i.soil_liquefaction))}
+          ${field("Movimientos en masa cercanos", yesNo("nearbyLandslides", i.nearby_landslides))}
+        `)}
+      </form>`;
+      document.getElementById("morphField").innerHTML = selectWithOther("siteMorphology", catalog.siteMorphology, { otherName: "siteMorphologyOther", selected: i.site_morphology || "", selectedOther: i.site_morphology_other || "" });
+      bindSelectsWithOther(container);
+      bindChipRadio(container);
+    }
+    async function saveStep4() {
+      const payload = formPayload();
+      for (const k of ["waterBodyThreat", "weakStory", "shortColumn", "stiffnessChange"]) {
+        payload[k] = chipRadioValue(document, k);
+      }
+      for (const k of ["totalCollapse", "partialCollapse", "evidentTilt", "adjacentBuildingRisk", "soilLiquefaction", "nearbyLandslides"]) {
+        payload[k] = chipRadioValue(document, k);
+      }
+      await patchInspection(payload);
+    }
+
+    // ===========================================================================
+    // PASO 5 — Peligro por daño en elementos estructurales y no estructurales (sec 9-10)
+    // ===========================================================================
+    function currentDamageFor(code) {
+      return (inspection.elementDamages || []).find((d) => d.element_code === code) || null;
+    }
+    function renderElementRow(def) {
+      const dmg = currentDamageFor(def.code);
+      const severity = dmg?.severity ?? null;
+      const hasDamageRecords = (inspection.damageRecords || []).filter((dr) => dr.element_damage_id === dmg?.id);
+      const showDetail = severity === "NL" || severity === "M" || severity === "S"; // cualquier severidad ya marcada permite registrar detalle con foto (antes solo M/S)
+      const hasGuide = !!(window.PATHOLOGY_GUIDE?.[def.code] || window.NON_STRUCTURAL_FAILURE_MODES?.[def.code]);
+      return `
+        <div class="border-b border-slate-100 last:border-b-0 py-3">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div class="text-sm font-medium text-slate-700 flex items-center gap-1.5">
+              <span>${escapeHtml(def.name)}</span>
+              ${hasGuide ? `<button type="button" class="open-guide-btn text-slate-400 hover:text-brand-600 text-xs shrink-0" data-element-code="${def.code}" data-element-name="${escapeHtml(def.name)}" title="Ver guía de patologías">📖</button>` : ""}
+              ${def.code === "OTROS" ? `<input name="otherLabel__OTROS" class="field-input mt-1 text-xs !py-1.5" placeholder="¿Cuál?" value="${escapeHtml(dmg?.other_label || "")}" />` : ""}
+            </div>
+            ${severityChips(def.code, def.tier, severity)}
+          </div>
+          ${
+            showDetail
+              ? `<div class="mt-2 pl-1">
+                  ${hasDamageRecords.map((dr) => `
+                    <div class="flex items-center justify-between gap-2 bg-slate-50 rounded-lg px-3 py-2 mb-1.5 text-xs">
+                      <span class="truncate">${escapeHtml(dr.location || dr.damage_type || "Daño registrado")}${dr.photos?.length ? ` · 📷 ${dr.photos.length}` : ""}</span>
+                      <div class="flex gap-2 shrink-0">
+                        <button type="button" class="edit-damage-btn text-brand-600" data-id="${dr.id}">Editar</button>
+                        <button type="button" class="delete-damage-btn text-red-500" data-id="${dr.id}">Eliminar</button>
+                      </div>
+                    </div>
+                  `).join("")}
+                  <button type="button" class="add-damage-detail-btn chip-btn !min-h-[36px] text-xs border-2 border-slate-400 bg-white text-slate-800" data-element-code="${def.code}" data-element-name="${escapeHtml(def.name)}">＋ Detalle con foto</button>
+                </div>`
+              : ""
+          }
+        </div>
+      `;
+    }
+    function renderStep5(container) {
+      const structural = [
+        { code: "COLUMNAS", name: "Columnas", tier: "CRITICO" },
+        { code: "MUROS_PORTANTES", name: "Muros portantes", tier: "CRITICO" },
+        { code: "VIGAS", name: "Vigas", tier: "SECUNDARIO" },
+        { code: "NODOS_CONEXION", name: "Nodos o puntos de conexión", tier: "CRITICO" },
+        { code: "RIOSTRAS", name: "Riostras", tier: "CRITICO" },
+        { code: "ENTREPISO", name: "Entrepiso", tier: "SECUNDARIO" },
+      ];
+      const nonStructural = [
+        "MUROS_FACHADA_ANTEPECHOS", "MUROS_DIVISORIOS", "VENTANALES_VIDRIOS_FACHADA", "CIELO_RASO_LUMINARIAS",
+        "CUBIERTAS", "ESCALERAS", "ASCENSORES", "BALCONES", "TANQUES_ELEVADOS", "INSTALACIONES_GAS",
+        "INSTALACIONES_ELECTRICAS", "ACUEDUCTO_ALCANTARILLADO", "OTROS",
+      ].map((code) => catalog.nonStructuralElements.find((e) => e.code === code));
+
+      container.innerHTML = `<form id="stepForm">
+        ${sectionCard("9. Peligro por daño en elementos estructurales", `<div>${structural.map(renderElementRow).join("")}</div>`, "N/L: Ninguno/Leve · M: Moderado · S: Severo")}
+        ${sectionCard("10. Peligro por daño en elementos no estructurales", `<div>${nonStructural.map(renderElementRow).join("")}</div>`, "N/L: Ninguno/Leve · M: Moderado · S: Severo")}
+      </form>`;
+
+      container.querySelectorAll(".severity-chip-btn").forEach((btn) =>
+        btn.addEventListener("click", async () => {
+          const code = btn.dataset.elementCode;
+          const severity = btn.dataset.severity;
+          const isStructural = structural.some((s) => s.code === code);
+          setSaveStatus("Guardando…");
+          await api(`/inspections/${inspectionId}/element-damages/${code}`, {
+            method: "PUT",
+            body: JSON.stringify({ category: isStructural ? "ESTRUCTURAL" : "NO_ESTRUCTURAL", severity }),
+          });
+          await loadAll();
+          renderStep5(container);
+          setSaveStatus("Guardado");
+        }),
+      );
+      container.querySelectorAll(".add-damage-detail-btn").forEach((btn) =>
+        btn.addEventListener("click", () => openDamageModal({ elementCode: btn.dataset.elementCode, elementName: btn.dataset.elementName })),
+      );
+      container.querySelectorAll(".open-guide-btn").forEach((btn) =>
+        btn.addEventListener("click", (e) => {
+          e.preventDefault();
+          openGuideModal(btn.dataset.elementCode, btn.dataset.elementName);
+        }),
+      );
+      container.querySelectorAll(".edit-damage-btn").forEach((btn) => btn.addEventListener("click", () => openDamageModal({ damageRecordId: btn.dataset.id })));
+      container.querySelectorAll(".delete-damage-btn").forEach((btn) =>
+        btn.addEventListener("click", async () => {
+          if (!confirm("¿Eliminar este registro de daño?")) return;
+          await api(`/damage-records/${btn.dataset.id}`, { method: "DELETE" });
+          await loadAll();
+          renderStep5(container);
+        }),
+      );
+      // "Otro" de la sección 10 (elemento OTROS): guarda la etiqueta al perder el foco.
+      container.querySelector('input[name="otherLabel__OTROS"]')?.addEventListener("blur", async (e) => {
+        const dmg = currentDamageFor("OTROS");
+        if (!dmg) return;
+        await api(`/inspections/${inspectionId}/element-damages/OTROS`, { method: "PUT", body: JSON.stringify({ category: "NO_ESTRUCTURAL", severity: dmg.severity, otherLabel: e.target.value }) });
+      });
+    }
+
+    // --- Modal de detalle de daño individual (extensión con fotos) ---
+    // Rediseño (feedback del usuario): antes había que guardar el daño primero
+    // para poder adjuntar fotos, porque cada foto se subía de inmediato contra
+    // un `damageRecordId` que aún no existía. Ahora las fotos elegidas/tomadas
+    // quedan en memoria (`damageModalPendingPhotos`, objetos File sin subir)
+    // hasta que el inspector presiona "Guardar daño": ahí se crea/actualiza el
+    // registro y se suben todas las fotos pendientes en una sola operación, y
+    // el modal se cierra solo — sin salir y volver a entrar para seguir cargando daños.
+    const SEVERITY_LABEL_ES = { NL: "Ninguno/Leve", M: "Moderado", S: "Severo" };
+    let damageModalCtx = null;
+    let damageModalPendingPhotos = []; // File[] — no subidos todavía
+
+    function openDamageModal({ elementCode, elementName, damageRecordId }) {
+      const form = document.getElementById("damageForm");
+      form.reset();
+      damageModalPendingPhotos = [];
+      let record = null;
+      if (damageRecordId) record = (inspection.damageRecords || []).find((d) => d.id === damageRecordId);
+      const dmg = record ? (inspection.elementDamages || []).find((d) => d.id === record.element_damage_id) : (inspection.elementDamages || []).find((d) => d.element_code === elementCode);
+      const def = [...catalog.structuralElements, ...catalog.nonStructuralElements].find((e) => e.code === (dmg?.element_code || elementCode));
+      damageModalCtx = {
+        elementDamageId: dmg?.id || null,
+        damageRecordId: damageRecordId || null,
+        elementLabel: def?.name || elementName || "",
+        elementCode: dmg?.element_code || elementCode || null,
+        existingPhotos: record?.photos ? [...record.photos] : [],
+      };
+      document.getElementById("damageModalElement").textContent = `${def?.name || elementName || ""}${record?.severity ? " — " + (SEVERITY_LABEL_ES[record.severity] || "") : dmg?.severity ? " — " + (SEVERITY_LABEL_ES[dmg.severity] || "") : ""}`;
+      if (record) {
+        form.location.value = record.location || "";
+        form.damageType.value = record.damage_type || "";
+        form.description.value = record.description || "";
+        form.extent.value = record.extent || "";
+        form.recommendation.value = record.recommendation || "";
+      } else if (dmg) {
+        form.recommendation.value = suggestedRecommendation(def?.name, dmg.severity, def?.tier);
+      }
+      renderDamagePhotosPreview();
+      openModal(document.getElementById("damageModal"));
+    }
+
+    /** Dibuja juntas las fotos ya guardadas (borrado inmediato vía API) y las pendientes de subir (solo en memoria, se descartan si se cancela). */
+    function renderDamagePhotosPreview() {
+      const el = document.getElementById("damagePhotos");
+      const existing = damageModalCtx?.existingPhotos || [];
+      if (!existing.length && !damageModalPendingPhotos.length) {
+        el.innerHTML = `<p class="text-xs text-slate-400 mt-1">Aún no hay fotos.</p>`;
+        return;
+      }
+      const existingHtml = existing
+        .map(
+          (p) => `
+        <div class="relative group">
+          <a href="${p.url}" target="_blank" rel="noopener"><img src="${p.url}" class="h-16 w-16 object-cover rounded-xl border border-slate-200" alt="Foto guardada" /></a>
+          <button type="button" class="existing-photo-delete-btn absolute -top-1.5 -right-1.5 bg-white border border-slate-300 rounded-full w-5 h-5 text-xs leading-none text-red-500 shadow" data-id="${p.id}" title="Eliminar foto">✕</button>
+        </div>`,
+        )
+        .join("");
+      const pendingHtml = damageModalPendingPhotos
+        .map(
+          (file, idx) => `
+        <div class="relative group">
+          <img src="${URL.createObjectURL(file)}" class="h-16 w-16 object-cover rounded-xl border-2 border-amber-500" alt="Foto pendiente de subir" />
+          <span class="absolute bottom-0 inset-x-0 bg-amber-500 text-white text-[9px] text-center leading-tight rounded-b-lg">Nueva</span>
+          <button type="button" class="pending-photo-delete-btn absolute -top-1.5 -right-1.5 bg-white border border-slate-300 rounded-full w-5 h-5 text-xs leading-none text-red-500 shadow" data-idx="${idx}" title="Quitar">✕</button>
+        </div>`,
+        )
+        .join("");
+      el.innerHTML = `<div class="flex flex-wrap gap-2 mt-2">${existingHtml}${pendingHtml}</div>`;
+      el.querySelectorAll(".existing-photo-delete-btn").forEach((btn) =>
+        btn.addEventListener("click", async () => {
+          await api(`/photos/${btn.dataset.id}`, { method: "DELETE" });
+          damageModalCtx.existingPhotos = damageModalCtx.existingPhotos.filter((p) => p.id !== btn.dataset.id);
+          renderDamagePhotosPreview();
+        }),
+      );
+      el.querySelectorAll(".pending-photo-delete-btn").forEach((btn) =>
+        btn.addEventListener("click", () => {
+          damageModalPendingPhotos.splice(Number(btn.dataset.idx), 1);
+          renderDamagePhotosPreview();
+        }),
+      );
+    }
+    function suggestedRecommendation(name, severity, tier) {
+      if (severity === "S" && tier === "CRITICO") return `Evacuar la zona afectada y solicitar evaluación estructural detallada de ${name?.toLowerCase() || "este elemento"} antes de reocupar.`;
+      if (severity === "S") return `Restringir el acceso al área y programar reparación de ${name?.toLowerCase() || "este elemento"} a la brevedad.`;
+      if (severity === "M") return `Programar reparación de ${name?.toLowerCase() || "este elemento"} en el corto plazo y monitorear.`;
+      return "";
+    }
+    function bindDeletePhotoButtons(root, onDone) {
+      root.querySelectorAll(".delete-photo-btn").forEach((btn) =>
+        btn.addEventListener("click", async () => {
+          await api(`/photos/${btn.dataset.id}`, { method: "DELETE" });
+          await loadAll();
+          onDone?.();
+        }),
+      );
+    }
+    // --- Modal: guía visual de patologías/fisuras por elemento ---
+    // Doble uso: (1) consulta de solo lectura (botón 📖 junto a cada elemento
+    // del paso 5) — se llama sin `onSelect`; (2) selector (botón "🔍 Elegir"
+    // en el campo "Tipo de daño" del modal de detalle) — se llama con
+    // `onSelect(title)`, que convierte cada esquema en una tarjeta clicable y
+    // habilita la fila "Otro" con texto libre.
+    function openGuideModal(elementCode, elementName, onSelect) {
+      document.getElementById("guideModalElement").textContent = elementName || "";
+      const patterns = window.PATHOLOGY_GUIDE?.[elementCode];
+      const genericMode = window.NON_STRUCTURAL_FAILURE_MODES?.[elementCode];
+      const contentEl = document.getElementById("guideModalContent");
+      const selectable = typeof onSelect === "function";
+
+      function cardInner(p) {
+        return `
+          <div class="w-20 h-20 shrink-0 bg-slate-50 rounded-lg flex items-center justify-center p-1.5">${p.svg}</div>
+          <div class="text-left">
+            <div class="text-sm font-medium text-slate-800">${escapeHtml(p.title)}</div>
+            <div class="text-xs text-slate-500 mt-0.5">${escapeHtml(p.desc)}</div>
+          </div>`;
+      }
+
+      if (patterns?.length) {
+        contentEl.innerHTML = patterns
+          .map((p, idx) =>
+            selectable
+              ? `<button type="button" class="guide-pick-btn w-full flex items-start gap-3 border-2 border-slate-300 hover:border-brand-600 hover:bg-brand-50 rounded-xl p-3 text-left transition-colors" data-idx="${idx}">${cardInner(p)}</button>`
+              : `<div class="flex items-start gap-3 border border-slate-200 rounded-xl p-3">${cardInner(p)}</div>`,
+          )
+          .join("");
+        if (selectable) {
+          contentEl.querySelectorAll(".guide-pick-btn").forEach((btn) =>
+            btn.addEventListener("click", () => {
+              onSelect(patterns[Number(btn.dataset.idx)].title);
+              closeModal(document.getElementById("guideModal"));
+            }),
+          );
+        }
+      } else if (genericMode) {
+        contentEl.innerHTML = `<div class="text-sm text-slate-600 bg-slate-50 rounded-xl p-3">${escapeHtml(genericMode)}</div>`;
+      } else {
+        contentEl.innerHTML = `<p class="text-sm text-slate-400">Sin guía disponible para este elemento todavía.</p>`;
+      }
+
+      const otherRow = document.getElementById("guideOtherRow");
+      otherRow.classList.toggle("hidden", !selectable);
+      if (selectable) {
+        const otherInput = document.getElementById("guideOtherInput");
+        otherInput.value = "";
+        document.getElementById("guideOtherBtn").onclick = () => {
+          const text = otherInput.value.trim();
+          if (!text) return;
+          onSelect(text);
+          closeModal(document.getElementById("guideModal"));
+        };
+      }
+      openModal(document.getElementById("guideModal"));
+    }
+    document.getElementById("guideCloseBtn").addEventListener("click", () => closeModal(document.getElementById("guideModal")));
+    document.getElementById("damageTypePickBtn").addEventListener("click", () => {
+      openGuideModal(damageModalCtx?.elementCode, damageModalCtx?.elementLabel, (title) => {
+        document.getElementById("damageTypeInput").value = title;
+      });
+    });
+
+    // Cerrar (cancelar): las fotos pendientes (no subidas) se descartan sin más;
+    // si se borraron fotos YA guardadas durante la edición, esas sí pegaron
+    // contra la API de inmediato, así que igual se refresca el paso 5 por si acaso.
+    document.getElementById("damageCancelBtn").addEventListener("click", async () => {
+      closeModal(document.getElementById("damageModal"));
+      damageModalPendingPhotos = [];
+      await loadAll();
+      renderStep5(document.getElementById("stepContent"));
+    });
+    document.getElementById("damagePhotoBtn").addEventListener("click", () => document.getElementById("damagePhotoInput").click());
+    document.getElementById("damagePhotoInput").addEventListener("change", (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      damageModalPendingPhotos.push(file);
+      renderDamagePhotosPreview();
+      e.target.value = ""; // permite volver a elegir el mismo archivo si se quita de la lista de pendientes
+    });
+    document.getElementById("damageForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const submitBtn = document.getElementById("damageSubmitBtn");
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Guardando…";
+      try {
+        const fd = new FormData(e.target);
+        const payload = Object.fromEntries(fd.entries());
+        payload.elementLabel = damageModalCtx.elementLabel;
+        payload.elementDamageId = damageModalCtx.elementDamageId;
+        let record;
+        if (damageModalCtx.damageRecordId) {
+          record = (await api(`/damage-records/${damageModalCtx.damageRecordId}`, { method: "PATCH", body: JSON.stringify(payload) })).damageRecord;
+        } else {
+          payload.id = window.newClientId();
+          record = (await api(`/inspections/${inspectionId}/damage-records`, { method: "POST", body: JSON.stringify(payload) })).damageRecord;
+          damageModalCtx.damageRecordId = record?.id || payload.id;
+        }
+        // Subir todas las fotos pendientes ahora que el registro ya existe.
+        for (const file of damageModalPendingPhotos) {
+          await uploadPhoto(inspectionId, file, { kind: "DANIO", damageRecordId: damageModalCtx.damageRecordId });
+        }
+        damageModalPendingPhotos = [];
+        await loadAll();
+        closeModal(document.getElementById("damageModal"));
+        // Corrige bug reportado: sin este refresco, el daño recién guardado no
+        // aparecía en la lista del paso 5 hasta volver a tocar la severidad.
+        renderStep5(document.getElementById("stepContent"));
+      } catch (err) {
+        alert("No se pudo guardar el daño: " + err.message);
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = "Guardar daño";
+      }
+    });
+
+    // ===========================================================================
+    // PASO 6 — Esquema (sección 11) + Clasificación de habitabilidad (sec 2/12)
+    // ===========================================================================
+    function renderStep6(container) {
+      const i = inspection;
+      const planta = (i.photos || []).filter((p) => p.kind === "ESQUEMA_PLANTA");
+      const elevacion = (i.photos || []).filter((p) => p.kind === "ESQUEMA_ELEVACION");
+      container.innerHTML = `<form id="stepForm">
+        ${sectionCard("11. Esquema", `
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <div class="text-sm font-medium text-slate-700 mb-1.5">Planta</div>
+              <div id="plantaGallery">${photoGallery(planta, { small: false })}</div>
+              ${photoUploadControl({ sketch: "PLANTA" }, "Foto de planta")}
+            </div>
+            <div>
+              <div class="text-sm font-medium text-slate-700 mb-1.5">Elevación</div>
+              <div id="elevacionGallery">${photoGallery(elevacion, { small: false })}</div>
+              ${photoUploadControl({ sketch: "ELEVACION" }, "Foto de elevación")}
+            </div>
+          </div>
+        `, "Fotografía el esquema dibujado a mano (planta y elevación).")}
+
+        ${sectionCard("Clasificación de habitabilidad y nivel de daño", `
+          <p class="text-xs text-slate-500 mb-3">Corresponde a las secciones 2 y 12 del formulario impreso (misma clasificación).</p>
+          <button type="button" id="suggestBtn" class="btn-secondary w-full mb-3">🧮 Calcular sugerencia a partir de los peligros registrados</button>
+          <div id="suggestionBox"></div>
+          <div class="mt-3">
+            ${field("Habitabilidad", chipRadio("habitability", [
+              { value: "VERDE", label: "🟢 Habitable" },
+              { value: "AMARILLO", label: "🟡 Uso restringido" },
+              { value: "ROJO", label: "🔴 No habitable" },
+            ], i.habitability, { cols: 1 }))}
+            ${field("Nivel de daño", chipRadio("damageLevel", [
+              { value: "NINGUNO_MENOR", label: "Ninguno/Menor" },
+              { value: "MODERADO", label: "Moderado" },
+              { value: "SEVERO", label: "Severo" },
+            ], i.damage_level, { cols: 3 }))}
+          </div>
+        `)}
+
+        ${sectionCard("Evaluación previa", `
+          ${field("¿Existe una evaluación previa?", chipRadio("previousEvaluationExists", [{ value: "1", label: "Sí" }, { value: "0", label: "No" }], i.previous_evaluation_exists == null ? null : String(i.previous_evaluation_exists), { cols: 2 }))}
+          <div class="grid grid-cols-2 gap-3">
+            ${field("Tipo de evaluación", `<input name="previousEvaluationType" class="field-input" value="${escapeHtml(i.previous_evaluation_type || "")}" />`)}
+            ${field("Entidad", `<input name="previousEvaluationEntity" class="field-input" value="${escapeHtml(i.previous_evaluation_entity || "")}" />`)}
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div class="mb-4"><label class="field-label">Clasificación previa</label>${chipRadio("previousEvaluationHabitability", [{ value: "VERDE", label: "Verde" }, { value: "AMARILLO", label: "Amarillo" }, { value: "ROJO", label: "Rojo" }], i.previous_evaluation_habitability, { cols: 3 })}</div>
+            ${field("Fecha", `<input type="date" name="previousEvaluationDate" class="field-input" value="${escapeHtml(i.previous_evaluation_date || "")}" />`)}
+          </div>
+        `)}
+      </form>`;
+      bindChipRadio(container);
+
+      container.querySelectorAll(".add-photo-btn").forEach((btn) =>
+        btn.addEventListener("click", () => container.querySelector(`.photo-input[data-sketch="${btn.dataset.sketch}"]`).click()),
+      );
+      container.querySelectorAll(".photo-input").forEach((input) =>
+        input.addEventListener("change", async (e) => {
+          const file = e.target.files[0];
+          if (!file) return;
+          await uploadPhoto(inspectionId, file, { kind: input.dataset.sketch === "PLANTA" ? "ESQUEMA_PLANTA" : "ESQUEMA_ELEVACION" });
+          await loadAll();
+          renderStep6(container);
+        }),
+      );
+      bindDeletePhotoButtons(container, () => { loadAll().then(() => renderStep6(container)); });
+
+      document.getElementById("suggestBtn").addEventListener("click", async () => {
+        const { suggestion } = await api(`/inspections/${inspectionId}/classify`, { method: "POST" });
+        const box = document.getElementById("suggestionBox");
+        box.innerHTML = `
+          <div class="rounded-xl border border-brand-200 bg-brand-50 p-3 text-sm">
+            <div class="font-medium text-brand-800 mb-1">Sugerencia: ${habitabilityBadge(suggestion.habitability)} · ${DAMAGE_LEVEL_META[suggestion.damageLevel]?.label || suggestion.damageLevel}</div>
+            <ul class="text-xs text-brand-700 list-disc list-inside space-y-0.5">${suggestion.reasons.map((r) => `<li>${escapeHtml(r)}</li>`).join("")}</ul>
+            <button type="button" id="applySuggestionBtn" class="chip-btn !min-h-[36px] text-xs border-brand-400 bg-white text-brand-700 mt-2">Usar esta sugerencia</button>
+          </div>
+        `;
+        document.getElementById("applySuggestionBtn").addEventListener("click", () => {
+          container.querySelector(`.radio-chip-item[name="habitability"][value="${suggestion.habitability}"]`).click();
+          container.querySelector(`.radio-chip-item[name="damageLevel"][value="${suggestion.damageLevel}"]`).click();
+        });
+      });
+    }
+    async function saveStep6() {
+      const payload = formPayload();
+      for (const k of ["habitability", "damageLevel", "previousEvaluationExists", "previousEvaluationHabitability"]) {
+        payload[k] = chipRadioValue(document, k);
+      }
+      await patchInspection(payload);
+    }
+
+    // ===========================================================================
+    // PASO 7 — Ocupación (sec 13) y Recomendaciones (sec 14)
+    // ===========================================================================
+    // Preselección de recomendaciones según la clasificación de habitabilidad —
+    // solo aplica la primera vez que se abre el paso (si el inspector ya guardó
+    // recomendaciones, se respetan tal cual y no se vuelven a sugerir encima).
+    function suggestedSafetyRecommendationCodes(i) {
+      if (i.habitability === "ROJO") {
+        return ["EVAL_ADICIONAL_ESTRUCTURAL", "EVACUAR_EDIFICACION", "RESTRINGIR_PASO_PEATONAL", "RESTRINGIR_PASO_VEHICULAR"];
+      }
+      if (i.habitability === "AMARILLO") {
+        return ["EVAL_ADICIONAL_ESTRUCTURAL", "RESTRINGIR_PASO_PEATONAL"];
+      }
+      return [];
+    }
+    function renderStep7(container) {
+      const i = inspection;
+      const hasSavedRecommendations = (i.safetyRecommendations || []).length > 0;
+      const selectedCodes = hasSavedRecommendations ? i.safetyRecommendations.map((r) => r.code) : suggestedSafetyRecommendationCodes(i);
+      const subtitle = hasSavedRecommendations
+        ? "Puedes agregar o quitar según corresponda."
+        : selectedCodes.length
+          ? "Se preseleccionaron algunas según la clasificación de habitabilidad — revisa y ajusta antes de continuar."
+          : "Selecciona las que apliquen.";
+      container.innerHTML = `<form id="stepForm">
+        ${sectionCard("13. Ocupación de la edificación", chipRadio("occupationStatus", [{ value: "OCUPADA", label: "Ocupada" }, { value: "DESOCUPADA", label: "Desocupada" }], i.occupation_status, { cols: 2 }))}
+        ${sectionCard("14. Recomendaciones y medidas de seguridad", checkboxGroup("safetyRecommendations", catalog.safetyRecommendations, selectedCodes, Object.fromEntries(i.safetyRecommendations.map((r) => [r.code, r.otherText]))), subtitle)}
+      </form>`;
+      bindChipRadio(container);
+      bindCheckboxGroup(container);
+    }
+    async function saveStep7() {
+      const payload = cleanPayload(formPayload(), ["safetyRecommendations"]);
+      payload.occupationStatus = chipRadioValue(document, "occupationStatus");
+      await patchInspection(payload);
+      await api(`/inspections/${inspectionId}/safety-recommendations`, { method: "PUT", body: JSON.stringify({ items: readCheckboxGroup(document, "safetyRecommendations") }) });
+    }
+
+    // ===========================================================================
+    // PASO 8 — Comentarios finales, evaluador, resumen y generación de informe
+    // ===========================================================================
+    function computeCompleteness(i) {
+      const checks = [
+        { label: "Nombre del evaluador", ok: !!i.evaluator_name },
+        { label: "Fecha de la inspección", ok: !!i.inspection_date },
+        { label: "Ubicación (departamento/municipio)", ok: !!(i.department && i.municipality) },
+        { label: "Coordenadas GPS", ok: i.latitude != null && i.longitude != null },
+        { label: "Dirección de la edificación", ok: !!i.address },
+        { label: "Sistema estructural", ok: (i.structuralSystems || []).length > 0 },
+        { label: "Clasificación de habitabilidad", ok: !!i.habitability },
+        { label: "Ocupación de la edificación", ok: !!i.occupation_status },
+        { label: "Información del evaluador (documento)", ok: !!i.evaluator_doc_number },
+      ];
+      const missing = checks.filter((c) => !c.ok);
+      const damageCount = (i.elementDamages || []).filter((d) => d.severity !== "NL").length;
+      const photoCount = (i.photos || []).length + (i.damageRecords || []).reduce((a, d) => a + (d.photos?.length || 0), 0);
+      return { checks, missing, damageCount, photoCount };
+    }
+    function renderStep8(container) {
+      const i = inspection;
+      const c = computeCompleteness(i);
+      container.innerHTML = `<form id="stepForm">
+        ${sectionCard("15. Comentarios finales", `<textarea name="finalComments" rows="4" class="field-input">${escapeHtml(i.final_comments || "")}</textarea>`)}
+        ${sectionCard("16. Información del evaluador", `
+          <div class="grid grid-cols-2 gap-3">
+            ${field("ID Evaluador", `<input name="evaluatorIdCode" class="field-input" value="${escapeHtml(i.evaluator_id_code || "")}" />`)}
+            <div class="mb-4"><label class="field-label">Tipo de documento</label>${chipRadio("evaluatorDocType", [{ value: "CC", label: "C.C." }, { value: "PASAPORTE", label: "Pasaporte" }], i.evaluator_doc_type, { cols: 2 })}</div>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            ${field("Número de documento", `<input name="evaluatorDocNumber" class="field-input" value="${escapeHtml(i.evaluator_doc_number || "")}" />`)}
+            ${field("Entidad", `<input name="evaluatorEntity" class="field-input" value="${escapeHtml(i.evaluator_entity || "")}" />`)}
+          </div>
+          ${field("Dependencia", `<input name="evaluatorDependencia" class="field-input" value="${escapeHtml(i.evaluator_dependencia || "")}" />`)}
+          <div class="text-xs font-semibold text-slate-400 uppercase tracking-wide mt-4 mb-2">Funcionario responsable</div>
+          <div class="grid grid-cols-2 gap-3">
+            ${field("Nombre", `<input name="responsibleOfficialName" class="field-input" value="${escapeHtml(i.responsible_official_name || "")}" />`)}
+            ${field("C.C.", `<input name="responsibleOfficialCc" class="field-input" value="${escapeHtml(i.responsible_official_cc || "")}" />`)}
+          </div>
+          ${field("Entidad", `<input name="responsibleOfficialEntity" class="field-input" value="${escapeHtml(i.responsible_official_entity || "")}" />`)}
+        `)}
+      </form>
+      ${sectionCard("Resumen de la inspección", `
+        <div class="flex flex-wrap items-center gap-3 mb-4">
+          ${habitabilityBadge(i.habitability)}
+          <span class="text-sm text-slate-600">Nivel de daño: <strong>${DAMAGE_LEVEL_META[i.damage_level]?.label || "—"}</strong></span>
+        </div>
+        <div class="grid grid-cols-2 gap-3 mb-4 text-center">
+          <div class="rounded-xl bg-slate-50 p-3"><div class="text-xl font-semibold text-slate-800">${c.damageCount}</div><div class="text-xs text-slate-500">Daños registrados</div></div>
+          <div class="rounded-xl bg-slate-50 p-3"><div class="text-xl font-semibold text-slate-800">${c.photoCount}</div><div class="text-xs text-slate-500">Fotografías</div></div>
+        </div>
+        ${
+          c.missing.length
+            ? `<div class="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 mb-2">
+                <strong>Información pendiente:</strong>
+                <ul class="list-disc list-inside mt-1">${c.missing.map((m) => `<li>${m.label}</li>`).join("")}</ul>
+              </div>`
+            : `<div class="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800 mb-2">Información completa.</div>`
+        }
+        <div class="flex flex-col sm:flex-row gap-2 mt-4">
+          <button type="button" id="reportBtn" class="btn-primary flex-1">📄 Generar informe PDF</button>
+          <button type="button" id="reportOficialBtn" class="btn-secondary flex-1">📋 Generar formato oficial (PDF)</button>
+          <button type="button" id="csvBtn" class="btn-secondary flex-1">⬇ Exportar datos (CSV)</button>
+        </div>
+        <p class="text-xs text-slate-500 text-center mt-2">El informe PDF trae portada, fotos y créditos. El formato oficial es la réplica exacta del "2A - Formulario regional homogenizado" diligenciada — úsalo si el organismo de atención de desastres exige su propio formato. Puedes generar los dos.</p>
+        <p class="text-xs text-slate-400 text-center mt-3">Al tocar "Finalizar →" abajo, la inspección se guarda, se marca como finalizada y vuelves al panel principal.</p>
+      `)}`;
+      bindChipRadio(container);
+
+      document.getElementById("reportBtn").addEventListener("click", async () => {
+        await saveStep8();
+        window.open(`/api/inspections/${inspectionId}/report.pdf`, "_blank");
+      });
+      document.getElementById("reportOficialBtn").addEventListener("click", async () => {
+        await saveStep8();
+        window.open(`/api/inspections/${inspectionId}/report-oficial.pdf`, "_blank");
+      });
+      document.getElementById("csvBtn").addEventListener("click", async () => {
+        await saveStep8();
+        window.open(`/api/inspections/${inspectionId}/report.csv`, "_blank");
+      });
+    }
+    async function saveStep8() {
+      const payload = formPayload();
+      payload.evaluatorDocType = chipRadioValue(document, "evaluatorDocType");
+      await patchInspection(payload);
+    }
+
+    // ---------------------------------------------------------------------
+    // Arranque
+    // ---------------------------------------------------------------------
+    loadAll()
+      .then(() => {
+        renderStepBar();
+        renderFooterButtons();
+        STEPS[currentStep - 1].render(document.getElementById("stepContent"));
+      })
+      .catch((err) => {
+        // Última red de seguridad: si algo falla incluso antes de tener un
+        // catálogo/inspección utilizable (p.ej. /api/catalog caído), no dejar
+        // la página en blanco sin explicación.
+        document.getElementById("stepContent").innerHTML = `
+          <div class="card p-6 text-center">
+            <p class="text-sm text-red-600 mb-3">No se pudo cargar la inspección: ${escapeHtml(err.message)}</p>
+            <a href="/inspections.html" class="btn-secondary inline-flex">← Volver a Inspecciones</a>
+          </div>`;
+      });
+  </script>
+</body>
+</html>

@@ -1,0 +1,91 @@
+definitions:
+  ios_shared: &ios_shared
+    instance_type: mac_mini_m2
+    max_build_duration: 45
+    environment:
+      node: 20
+      xcode: latest
+      vars:
+        XCODE_WORKSPACE: "ios/App/App.xcworkspace"
+        XCODE_SCHEME: "App"
+    scripts:
+      - name: Instalar dependencias de Node
+        script: npm ci
+      # OJO: a propósito NO se corre `npm run sync-web` acá -- ese script lee
+      # "D:\Claude\Inspección Estructural\public" del disco local de
+      # desarrollo, que no existe en esta máquina en la nube. Por eso `www/`
+      # SÍ se versiona en este repo (ver .gitignore): hay que correr `npm run
+      # sync-web` en la máquina local y comitear los cambios de `www/` ANTES
+      # de hacer push, para que la compilación en la nube tenga la versión
+      # actual de la app web.
+      - name: Sincronizar proyecto iOS con www/ ya comiteado
+        script: npx cap sync ios
+
+workflows:
+  # ---------------------------------------------------------------------
+  # 1) SIN COSTO, SIN CUENTA DE APPLE DEVELOPER -- solo para confirmar que
+  #    el proyecto compila. Genera un .app para el SIMULADOR de iOS (no se
+  #    puede instalar en un iPhone real, pero no requiere firma de código
+  #    ni ningún dato de Apple Developer). Útil como primera prueba antes de
+  #    pagar la cuenta de Apple.
+  # ---------------------------------------------------------------------
+  ios-simulator-smoke-build:
+    name: iOS — build de prueba (simulador, sin firma)
+    <<: *ios_shared
+    scripts:
+      - name: Instalar dependencias de Node
+        script: npm ci
+      - name: Sincronizar proyecto iOS con www/ ya comiteado
+        script: npx cap sync ios
+      - name: Compilar para el simulador de iOS (sin firma de código)
+        script: |
+          xcodebuild \
+            -workspace "$XCODE_WORKSPACE" \
+            -scheme "$XCODE_SCHEME" \
+            -sdk iphonesimulator \
+            -configuration Debug \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+    artifacts:
+      - build/Build/Products/Debug-iphonesimulator/*.app
+
+  # ---------------------------------------------------------------------
+  # 2) Build real para dispositivo/TestFlight -- requiere haber conectado en
+  #    Codemagic (Team settings → Integrations → App Store Connect) una
+  #    cuenta de Apple Developer Program de pago (USD 99/año). La primera
+  #    vez conviene configurar la firma de código desde la UI de Codemagic
+  #    (Workflow editor → Code signing → iOS), que ajusta este workflow
+  #    automáticamente -- lo de acá es la referencia/punto de partida.
+  # ---------------------------------------------------------------------
+  ios-device-build:
+    name: iOS — build para dispositivo / TestFlight
+    <<: *ios_shared
+    integrations:
+      app_store_connect: codemagic_api_key # nombre que le des a la integración en Codemagic
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: edu.utp.evaldanosedificaciones
+    scripts:
+      - name: Instalar dependencias de Node
+        script: npm ci
+      - name: Sincronizar proyecto iOS con www/ ya comiteado
+        script: npx cap sync ios
+      - name: Configurar firma de código automática
+        script: xcode-project use-profiles
+      - name: Compilar y firmar el IPA
+        script: |
+          xcode-project build-ipa \
+            --workspace "$XCODE_WORKSPACE" \
+            --scheme "$XCODE_SCHEME"
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      email:
+        recipients:
+          - amarilesinterventor@gmail.com
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true

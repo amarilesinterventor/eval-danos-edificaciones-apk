@@ -1,0 +1,28 @@
+node_modules/
+android/build/
+android/app/build/
+android/app/release/
+android/.gradle/
+android/local.properties
+android/captures/
+android/.idea/
+android/app/src/main/assets/public/
+ios/App/App/public/
+ios/App/Pods/
+ios/App/App.xcworkspace/xcuserdata/
+ios/App/App.xcodeproj/xcuserdata/
+ios/App/CapApp-SPM/.build/
+ios/DerivedData/
+*.xcuserstate
+*.log
+.DS_Store
+
+# www/ SÍ se versiona (a propósito, a diferencia de otros proyectos Capacitor):
+# es la única forma de que Codemagic (compilación iOS en la nube, sin Mac
+# local) tenga la app web disponible, ya que no puede leer
+# "D:\Claude\Inspección Estructural\public" del disco de este equipo. Antes de
+# hacer push para disparar una compilación en la nube, corré `npm run
+# sync-web` y confirmá que `git status` muestra los cambios de `www/` listos
+# para commitear. El build local de Android (`npm run build-apk`) sigue
+# regenerando `www/` en cada corrida igual que antes -- esto no cambia nada
+# de ese flujo, solo deja de estar en .gitignore.

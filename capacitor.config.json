@@ -1,0 +1,23 @@
+{
+  "appId": "edu.utp.evaldanosedificaciones",
+  "appName": "Eval. Daños Edif.",
+  "webDir": "www",
+  "backgroundColor": "#f8fafc",
+  "android": {
+    "backgroundColor": "#f8fafc",
+    "allowMixedContent": false
+  },
+  "ios": {
+    "backgroundColor": "#f8fafc",
+    "contentInset": "automatic"
+  },
+  "server": {
+    "androidScheme": "https",
+    "iosScheme": "https"
+  },
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": true
+    }
+  }
+}
