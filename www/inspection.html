@@ -869,10 +869,13 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
       </form>`;
       bindChipRadio(container);
 
-      container.querySelectorAll(".add-photo-btn").forEach((btn) =>
-        btn.addEventListener("click", () => container.querySelector(`.photo-input[data-sketch="${btn.dataset.sketch}"]`).click()),
+      container.querySelectorAll(".add-photo-camera-btn").forEach((btn) =>
+        btn.addEventListener("click", () => container.querySelector(`.photo-input-camera[data-sketch="${btn.dataset.sketch}"]`).click()),
       );
-      container.querySelectorAll(".photo-input").forEach((input) =>
+      container.querySelectorAll(".add-photo-gallery-btn").forEach((btn) =>
+        btn.addEventListener("click", () => container.querySelector(`.photo-input-gallery[data-sketch="${btn.dataset.sketch}"]`).click()),
+      );
+      container.querySelectorAll(".photo-input-camera, .photo-input-gallery").forEach((input) =>
         input.addEventListener("change", async (e) => {
           const file = e.target.files[0];
           if (!file) return;

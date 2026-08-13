@@ -231,18 +231,25 @@ function photoGallery(photos, { small = true } = {}) {
   </div>`;
 }
 
-/** Botón "+ foto" grande (icono de cámara) + input file oculto -- sin el atributo `capture`, así el
- * selector nativo del celular ofrece tanto "Cámara" como "Galería" (con `capture="environment"` varios
- * navegadores/WebViews saltan directo a la cámara y esconden la opción de elegir una foto ya existente). */
+/** Dos botones separados -- "Tomar foto" (fuerza la cámara con `capture="environment"`) y "Elegir de
+ * galería" (sin `capture`) -- con su input file oculto correspondiente, en vez de un único botón que
+ * dependía de que el selector nativo del celular mostrara ambas opciones (varía entre navegadores/
+ * WebViews). Mismo patrón que el modal de detalle de daño en inspection.html. */
 function photoUploadControl(dataAttrs, label = "Agregar foto") {
   const attrs = Object.entries(dataAttrs)
     .map(([k, v]) => `data-${k}="${v}"`)
     .join(" ");
   return `
-    <button type="button" class="add-photo-btn chip-btn border-2 border-slate-400 bg-white text-slate-800 hover:bg-slate-50" ${attrs}>
-      📷 ${escapeHtml(label)}
-    </button>
-    <input type="file" accept="image/*" class="hidden photo-input" ${attrs} />
+    <div class="flex gap-2 flex-wrap">
+      <button type="button" class="add-photo-camera-btn chip-btn border-2 border-slate-400 bg-white text-slate-800 hover:bg-slate-50" title="${escapeHtml(label)}" ${attrs}>
+        📷 Tomar foto
+      </button>
+      <button type="button" class="add-photo-gallery-btn chip-btn border-2 border-slate-400 bg-white text-slate-800 hover:bg-slate-50" title="${escapeHtml(label)}" ${attrs}>
+        🖼️ Elegir de galería
+      </button>
+    </div>
+    <input type="file" accept="image/*" capture="environment" class="hidden photo-input-camera" ${attrs} />
+    <input type="file" accept="image/*" class="hidden photo-input-gallery" ${attrs} />
   `;
 }
 
