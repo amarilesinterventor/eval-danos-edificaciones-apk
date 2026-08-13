@@ -5,7 +5,7 @@
 // arriesgar mostrar datos desactualizados cuando sí hay conexión. Las
 // escrituras (POST/PUT/PATCH/DELETE) NO pasan por aquí — las maneja la cola
 // de sincronización en IndexedDB (ver public/offline.js).
-const CACHE_VERSION = "v10"; // v10: paso 5 — "+ Detalle con foto" ahora también disponible con severidad N/L, no solo M/S
+const CACHE_VERSION = "v11"; // v11: fotos -- selector permite elegir desde galería (no solo cámara)
 const SHELL_CACHE = `shell-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `runtime-${CACHE_VERSION}`;
 

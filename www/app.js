@@ -231,7 +231,9 @@ function photoGallery(photos, { small = true } = {}) {
   </div>`;
 }
 
-/** Botón "+ foto" grande (icono de cámara) + input file oculto con captura de cámara en móvil. */
+/** Botón "+ foto" grande (icono de cámara) + input file oculto -- sin el atributo `capture`, así el
+ * selector nativo del celular ofrece tanto "Cámara" como "Galería" (con `capture="environment"` varios
+ * navegadores/WebViews saltan directo a la cámara y esconden la opción de elegir una foto ya existente). */
 function photoUploadControl(dataAttrs, label = "Agregar foto") {
   const attrs = Object.entries(dataAttrs)
     .map(([k, v]) => `data-${k}="${v}"`)
@@ -240,7 +242,7 @@ function photoUploadControl(dataAttrs, label = "Agregar foto") {
     <button type="button" class="add-photo-btn chip-btn border-2 border-slate-400 bg-white text-slate-800 hover:bg-slate-50" ${attrs}>
       📷 ${escapeHtml(label)}
     </button>
-    <input type="file" accept="image/*" capture="environment" class="hidden photo-input" ${attrs} />
+    <input type="file" accept="image/*" class="hidden photo-input" ${attrs} />
   `;
 }
 

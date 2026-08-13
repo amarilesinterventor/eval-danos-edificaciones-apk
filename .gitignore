@@ -16,6 +16,7 @@ ios/DerivedData/
 *.xcuserstate
 *.log
 .DS_Store
+*.apk
 
 # www/ SÍ se versiona (a propósito, a diferencia de otros proyectos Capacitor):
 # es la única forma de que Codemagic (compilación iOS en la nube, sin Mac
