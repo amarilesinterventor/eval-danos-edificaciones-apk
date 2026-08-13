@@ -60,9 +60,11 @@
           <label class="field-label">Fotografías</label>
           <div id="damagePhotos"></div>
           <div class="flex gap-2 mt-2">
-            <button type="button" id="damagePhotoBtn" class="chip-btn border-2 border-slate-400 bg-white text-slate-800">📷 Tomar / elegir foto</button>
+            <button type="button" id="damagePhotoCameraBtn" class="chip-btn border-2 border-slate-400 bg-white text-slate-800">📷 Tomar foto</button>
+            <button type="button" id="damagePhotoGalleryBtn" class="chip-btn border-2 border-slate-400 bg-white text-slate-800">🖼️ Elegir de galería</button>
           </div>
-          <input type="file" accept="image/*" id="damagePhotoInput" class="hidden" />
+          <input type="file" accept="image/*" capture="environment" id="damagePhotoCameraInput" class="hidden" />
+          <input type="file" accept="image/*" id="damagePhotoGalleryInput" class="hidden" />
           <p class="text-xs text-slate-400 mt-1.5">Las fotos se suben al guardar el daño — puedes agregar varias antes de guardar.</p>
         </div>
         <div class="flex justify-end gap-2 pt-2">
@@ -765,14 +767,17 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
       await loadAll();
       renderStep5(document.getElementById("stepContent"));
     });
-    document.getElementById("damagePhotoBtn").addEventListener("click", () => document.getElementById("damagePhotoInput").click());
-    document.getElementById("damagePhotoInput").addEventListener("change", (e) => {
+    document.getElementById("damagePhotoCameraBtn").addEventListener("click", () => document.getElementById("damagePhotoCameraInput").click());
+    document.getElementById("damagePhotoGalleryBtn").addEventListener("click", () => document.getElementById("damagePhotoGalleryInput").click());
+    function onDamagePhotoInputChange(e) {
       const file = e.target.files[0];
       if (!file) return;
       damageModalPendingPhotos.push(file);
       renderDamagePhotosPreview();
       e.target.value = ""; // permite volver a elegir el mismo archivo si se quita de la lista de pendientes
-    });
+    }
+    document.getElementById("damagePhotoCameraInput").addEventListener("change", onDamagePhotoInputChange);
+    document.getElementById("damagePhotoGalleryInput").addEventListener("change", onDamagePhotoInputChange);
     document.getElementById("damageForm").addEventListener("submit", async (e) => {
       e.preventDefault();
       const submitBtn = document.getElementById("damageSubmitBtn");
