@@ -97,6 +97,8 @@
 
   <script src="/native-shim.js"></script>
   <script src="/offline.js"></script>
+  <script src="/local-index.js"></script>
+  <script src="/classification-client.js"></script>
   <script src="/colombia.js"></script>
   <script src="/pathology-guide.js"></script>
   <script src="/app.js"></script>
@@ -156,6 +158,10 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
       } catch (err) {
         // localStorage lleno o no disponible: no es crítico, solo se pierde el respaldo offline.
       }
+      // Alimenta también el índice liviano que usan inspections.html/index.html
+      // para poder listar/resumir las inspecciones de este dispositivo sin
+      // depender de un GET exitoso al servidor (ver local-index.js).
+      window.localInspectionsIndex?.upsert(insp);
     }
     function readLocalInspectionCache(id) {
       try {
@@ -220,23 +226,36 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
      * Foto subida sin conexión: `uploadPhoto()` (app.js) la encola igual que
      * cualquier otra escritura (ver api()/offline.js), pero al quedar
      * encolada no hay ninguna URL real todavía (el servidor es quien la
-     * genera al guardar el archivo). Se agrega una vista previa local (URL
-     * de blob, propia de esta pestaña) para que la foto se vea reflejada de
-     * inmediato -- antes, quedaba fuera de la pantalla hasta sincronizar
-     * (bug real detectado en campo: "no refleja las fotos tomadas"). Esta
-     * vista previa NO se guarda en el respaldo de localStorage (un blob:
-     * URL no sobrevive un recargue de página) -- dura mientras la pestaña
-     * siga abierta; al sincronizar de verdad, `loadAll()` trae la URL real.
+     * genera al guardar el archivo). Se agrega una vista previa local para
+     * que la foto se vea reflejada de inmediato.
+     *
+     * Bug real detectado en campo (dos veces): (1) originalmente se usaba
+     * `URL.createObjectURL(file)` para la vista previa, pero un blob: URL
+     * NO sobrevive un recargue de página -- se perdía en cuanto `loadAll()`
+     * volvía a ejecutarse (que pasa justo después, en todos los sitios que
+     * llaman a esta función). (2) esta función tampoco llamaba a
+     * `cacheInspectionLocally()`, así que ese mismo `loadAll()` reemplazaba
+     * `inspection` por la última copia cacheada -- que todavía no incluía la
+     * foto recién agregada -- descartando el cambio en el acto. En conjunto,
+     * esto hacía que una foto agregada sin conexión pareciera guardarse un
+     * instante y luego desaparecer, exactamente el síntoma reportado
+     * ("las fotos solo cargan... cuando el celular está conectado a
+     * internet"). Ahora se usa la misma imagen ya redimensionada a dataURL
+     * (`resizeImageToDataUrl`, ver app.js) que se habría subido si hubiera
+     * señal -- un dataURL SÍ sobrevive un recargue/reapertura de la app
+     * porque queda embebido tal cual en el JSON cacheado -- y se cachea de
+     * inmediato.
      */
-    function applyQueuedPhotoLocally(file, { kind, damageRecordId = null }) {
+    async function applyQueuedPhotoLocally(file, { kind, damageRecordId = null }) {
       if (!inspection) return;
       const now = new Date().toISOString();
+      const dataUrl = await resizeImageToDataUrl(file);
       const photo = {
         id: window.newClientId ? window.newClientId() : `local-photo-${now}`,
         inspection_id: inspectionId,
         damage_record_id: damageRecordId,
         kind,
-        url: URL.createObjectURL(file),
+        url: dataUrl,
         caption: null,
         latitude: null,
         longitude: null,
@@ -252,6 +271,7 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
           dr.photos.push(photo);
         }
       }
+      cacheInspectionLocally(inspection);
     }
     // Mismo mapeo camelCase -> columna que usa el servidor
     // (src/db/queries.ts, INSPECTION_COLUMN_MAP) -- se duplica acá a propósito
@@ -355,7 +375,16 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
         // Antes de rendirse a un stub vacío, se intenta la última copia
         // conocida en este dispositivo, para no perder de vista el trabajo
         // ya hecho en una inspección que sí se alcanzó a abrir antes.
-        inspection = readLocalInspectionCache(inspectionId) || BLANK_INSPECTION_STUB();
+        const cached = readLocalInspectionCache(inspectionId);
+        inspection = cached || BLANK_INSPECTION_STUB();
+        // Si no había nada cacheado todavía (p.ej. una inspección recién
+        // creada con "+ Nueva" que nunca llegó a contactar al servidor -- el
+        // caso normal cuando no hay conexión, o siempre en la variante
+        // local-first), se cachea el stub de inmediato: así aparece en el
+        // listado/panel ("Borrador") desde el primer instante, igual que
+        // pasaría con un servidor real que crea la fila en cuanto se hace el
+        // POST, en vez de solo aparecer hasta el primer campo guardado.
+        if (!cached) cacheInspectionLocally(inspection);
       }
       // Espejo público de solo lectura para scripts inyectados externamente
       // (ver eval-danos-edificaciones-apk*/native-shim.js): `catalog` e
@@ -1015,7 +1044,7 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
         // Subir todas las fotos pendientes ahora que el registro ya existe.
         for (const file of damageModalPendingPhotos) {
           const photoRes = await uploadPhoto(inspectionId, file, { kind: "DANIO", damageRecordId: damageModalCtx.damageRecordId });
-          if (photoRes?.queued) applyQueuedPhotoLocally(file, { kind: "DANIO", damageRecordId: damageModalCtx.damageRecordId });
+          if (photoRes?.queued) await applyQueuedPhotoLocally(file, { kind: "DANIO", damageRecordId: damageModalCtx.damageRecordId });
         }
         damageModalPendingPhotos = [];
         await loadAll();
@@ -1024,7 +1053,21 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
         // aparecía en la lista del paso 5 hasta volver a tocar la severidad.
         renderStep5(document.getElementById("stepContent"));
       } catch (err) {
-        alert("No se pudo guardar el daño: " + err.message);
+        // "No se pudo leer la imagen." viene de resizeImageToDataUrl (app.js)
+        // cuando el navegador no logra decodificar el archivo elegido -- se
+        // ha visto en campo específicamente sin conexión al elegir una foto
+        // de galería. Causa más probable: en Android, algunas apps de
+        // galería (p.ej. Fotos de Google con la copia de seguridad activada
+        // y "Liberar espacio del dispositivo") solo guardan una miniatura
+        // localmente y descargan la imagen real bajo demanda -- sin señal,
+        // esa descarga no puede completarse aunque la foto se vea en la
+        // galería. No es algo que esta app pueda evitar por completo, pero
+        // sí se puede explicar mejor que un mensaje genérico.
+        if (/no se pudo leer la imagen/i.test(err.message || "")) {
+          alert("No se pudo leer esa foto sin conexión. Es posible que esa imagen esté solo en la copia de seguridad en la nube (p.ej. Google Fotos) y no descargada en el celular todavía. Prueba con \"📷 Tomar foto\" en su lugar, o abre esa foto una vez en tu app de galería (con señal) para que se descargue al dispositivo antes de intentarlo de nuevo.");
+        } else {
+          alert("No se pudo guardar el daño: " + err.message);
+        }
       } finally {
         submitBtn.disabled = false;
         submitBtn.textContent = "Guardar daño";
@@ -1097,16 +1140,56 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
           const file = e.target.files[0];
           if (!file) return;
           const kind = input.dataset.sketch === "PLANTA" ? "ESQUEMA_PLANTA" : "ESQUEMA_ELEVACION";
-          const photoRes = await uploadPhoto(inspectionId, file, { kind });
-          if (photoRes?.queued) applyQueuedPhotoLocally(file, { kind });
-          await loadAll();
-          renderStep6(container);
+          try {
+            const photoRes = await uploadPhoto(inspectionId, file, { kind });
+            if (photoRes?.queued) await applyQueuedPhotoLocally(file, { kind });
+            await loadAll();
+            renderStep6(container);
+          } catch (err) {
+            // Ver el mismo manejo (y su explicación) en el envío del modal de daño (paso 5).
+            if (/no se pudo leer la imagen/i.test(err.message || "")) {
+              alert("No se pudo leer esa foto sin conexión. Es posible que esa imagen esté solo en la copia de seguridad en la nube (p.ej. Google Fotos) y no descargada en el celular todavía. Prueba con \"📷 Tomar foto\" en su lugar, o abre esa foto una vez en tu app de galería (con señal) para que se descargue al dispositivo antes de intentarlo de nuevo.");
+            } else {
+              alert("No se pudo guardar la foto: " + err.message);
+            }
+          } finally {
+            e.target.value = ""; // permite volver a elegir el mismo archivo si el intento anterior falló
+          }
         }),
       );
       bindDeletePhotoButtons(container, () => { loadAll().then(() => renderStep6(container)); });
 
       document.getElementById("suggestBtn").addEventListener("click", async () => {
-        const { suggestion } = await api(`/inspections/${inspectionId}/classify`, { method: "POST" });
+        // Respaldo local sin conexión: el motor de sugerencia es una función
+        // pura (ver src/domain/classification.ts) portada tal cual a
+        // classification-client.js -- si el servidor no responde, se calcula
+        // acá mismo con los datos ya cargados en `inspection`/`catalog`, en
+        // vez de dejar el botón sin funcionar (bug real: antes esto no tenía
+        // manejo de error y quedaba como una promesa rechazada sin capturar).
+        //
+        // OJO: para un POST, `api()` (app.js) NO lanza cuando falla por red
+        // -- la encola y resuelve con `{queued:true}` a propósito, para no
+        // bloquear al usuario (correcto para un guardado, pero acá no hay
+        // nada que "guardar", se necesita el resultado YA). Por eso no basta
+        // con un try/catch alrededor de `await api(...)`: hay que revisar
+        // también si la respuesta vino sin `suggestion` (encolada/error).
+        let suggestion;
+        let apiErr = null;
+        const res = await api(`/inspections/${inspectionId}/classify`, { method: "POST" }).catch((err) => {
+          apiErr = err;
+          return null;
+        });
+        if (res?.suggestion) {
+          suggestion = res.suggestion;
+        } else {
+          suggestion = window.suggestClassificationLocal
+            ? window.suggestClassificationLocal(inspection, catalog)
+            : null;
+          if (!suggestion) {
+            alert("No se pudo calcular la sugerencia: " + (apiErr?.message || "error desconocido"));
+            return;
+          }
+        }
         const box = document.getElementById("suggestionBox");
         box.innerHTML = `
           <div class="rounded-xl border border-brand-200 bg-brand-50 p-3 text-sm">

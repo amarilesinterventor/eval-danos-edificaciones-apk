@@ -49,6 +49,7 @@
 
   <script src="/native-shim.js"></script>
   <script src="/offline.js"></script>
+  <script src="/local-index.js"></script>
   <script src="/app.js"></script>
   <script>
     renderNav("home");
@@ -56,26 +57,43 @@
 
     async function load() {
       let stats;
+      let offline = false;
       try {
         stats = await api("/dashboard/stats");
       } catch (err) {
-        // Sin conexión (o el servidor no responde): el panel es solo un
-        // resumen -- no bloquea nada crítico, pero antes se quedaba en
-        // blanco sin explicación (la función lanzaba sin manejo de error).
-        // Se avisa y se dirige a lo que sí sigue funcionando sin señal:
-        // continuar una inspección ya abierta antes ("Inspecciones", que
-        // guarda su propia copia local) o crear una nueva.
-        document.getElementById("stats").innerHTML = "";
-        document.getElementById("habBreakdown").innerHTML = "";
-        document.getElementById("recentList").innerHTML = `
-          <div class="card p-8 text-center text-sm text-slate-500">
-            ⚠️ Sin conexión — el resumen no está disponible en este momento.<br />
-            Puedes seguir trabajando: usa <a href="/inspections.html" class="text-brand-600 hover:underline">Inspecciones</a> para continuar una que ya hayas abierto antes, o "+ Nueva inspección" para empezar una.
-          </div>`;
-        return;
+        // Respaldo local: mismo índice liviano que alimenta el listado (ver
+        // local-index.js/inspections.html) -- así el panel también funciona
+        // con lo que ya hay guardado en este dispositivo en vez de quedarse
+        // en blanco (antes esto ni siquiera calculaba nada offline). No
+        // incluye el conteo de fotografías (el índice es liviano a
+        // propósito, no guarda esa cuenta) ni "Últimas inspecciones" en un
+        // orden distinto al de actualización -- limitaciones aceptables de
+        // un resumen calculado en el dispositivo.
+        offline = true;
+        const items = window.localInspectionsIndex ? window.localInspectionsIndex.list() : [];
+        const byStatusCount = {};
+        const byHabCount = {};
+        for (const i of items) {
+          byStatusCount[i.status] = (byStatusCount[i.status] || 0) + 1;
+          if (i.habitability) byHabCount[i.habitability] = (byHabCount[i.habitability] || 0) + 1;
+        }
+        stats = {
+          total: items.length,
+          byStatus: Object.entries(byStatusCount).map(([status, n]) => ({ status, n })),
+          byHabitability: Object.entries(byHabCount).map(([habitability, n]) => ({ habitability, n })),
+          totalPhotos: null,
+          recent: items.slice(0, 10),
+        };
       }
 
+      // `col-span-full`: #stats es un grid (grid-cols-2/md:grid-cols-4) --
+      // sin esto, este aviso quedaría metido como una celda más en vez de
+      // ocupar el ancho completo por encima de las tarjetas.
+      const offlineNotice = offline
+        ? `<div class="col-span-full card p-3 text-xs text-amber-700 bg-amber-50 border border-amber-200">⚠️ Sin conexión — mostrando el resumen de las inspecciones guardadas en este dispositivo.</div>`
+        : "";
       document.getElementById("stats").innerHTML = `
+        ${offlineNotice}
         <div class="card p-4">
           <div class="text-2xl font-semibold text-slate-800">${stats.total}</div>
           <div class="text-xs text-slate-500 mt-1">Inspecciones totales</div>
@@ -89,7 +107,7 @@
           <div class="text-xs text-slate-500 mt-1">Finalizadas</div>
         </div>
         <div class="card p-4">
-          <div class="text-2xl font-semibold text-slate-800">${stats.totalPhotos}</div>
+          <div class="text-2xl font-semibold text-slate-800">${stats.totalPhotos === null ? "—" : stats.totalPhotos}</div>
           <div class="text-xs text-slate-500 mt-1">Fotografías registradas</div>
         </div>
       `;

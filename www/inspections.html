@@ -31,6 +31,7 @@
 
   <script src="/native-shim.js"></script>
   <script src="/offline.js"></script>
+  <script src="/local-index.js"></script>
   <script src="/app.js"></script>
   <script>
     renderNav("inspections");
@@ -88,12 +89,20 @@
         ({ inspections } = await api(`/inspections${qs}`));
         if (!currentFilter) cacheInspectionsList(inspections);
       } catch (err) {
-        const cached = !currentFilter ? readInspectionsListCache() : null;
-        if (!cached) {
-          listEl.innerHTML = `<div class="card p-8 text-center text-sm text-slate-500">Sin conexión y todavía sin datos guardados en este dispositivo. Abre esta lista una vez con señal para poder consultarla después sin conexión.</div>`;
+        // Respaldo local: el índice liviano (local-index.js) se alimenta de
+        // cada inspección guardada/creada en este dispositivo -- a
+        // diferencia del respaldo viejo (`readInspectionsListCache`), que
+        // solo se poblaba tras un GET exitoso al servidor y por eso se
+        // quedaba vacío para siempre en la variante local-first (que nunca
+        // llega a tener uno), este sí refleja lo que de verdad hay guardado
+        // acá, con soporte de filtro por estado incluido.
+        inspections = window.localInspectionsIndex
+          ? window.localInspectionsIndex.list({ status: currentFilter || undefined })
+          : readInspectionsListCache() || [];
+        if (!inspections.length) {
+          listEl.innerHTML = `<div class="card p-8 text-center text-sm text-slate-500">Sin conexión y todavía sin datos guardados en este dispositivo${currentFilter ? " con este estado" : ""}. Abre esta lista una vez con señal para poder consultarla después sin conexión, o crea una inspección nueva.</div>`;
           return;
         }
-        inspections = cached;
         offline = true;
       }
       const offlineNotice = offline
@@ -125,6 +134,7 @@
         btn.addEventListener("click", async () => {
           if (!confirm(`¿Eliminar "${btn.dataset.name}"? Esta acción no se puede deshacer.`)) return;
           await api(`/inspections/${btn.dataset.id}`, { method: "DELETE" });
+          window.localInspectionsIndex?.remove(btn.dataset.id);
           load();
         }),
       );
