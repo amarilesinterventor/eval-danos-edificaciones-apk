@@ -95,7 +95,6 @@
     </div>
   </div>
 
-  <script src="/native-shim.js"></script>
   <script src="/offline.js"></script>
   <script src="/colombia.js"></script>
   <script src="/pathology-guide.js"></script>
@@ -253,6 +252,59 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
         }
       }
     }
+    // Mismo mapeo camelCase -> columna que usa el servidor
+    // (src/db/queries.ts, INSPECTION_COLUMN_MAP) -- se duplica acá a propósito
+    // (en vez de depender de la respuesta del servidor) para poder aplicar el
+    // PATCH de cualquier paso del wizard localmente cuando queda encolado sin
+    // conexión. Bug real reportado en campo: solo el paso 5 (severidad/daños/
+    // fotos) tenía este respaldo -- los demás pasos (identificación,
+    // ubicación, edificación, sistema estructural, esquema/clasificación,
+    // evaluación previa, ocupación/recomendaciones/comentarios finales) no lo
+    // tenían, así que al volver a un paso ya diligenciado sin conexión
+    // aparecía vacío otra vez, aunque el dato sí estuviera en cola para
+    // sincronizar.
+    const INSPECTION_FIELD_MAP = {
+      formNumber: "form_number", zoneId: "zone_id", evaluatorName: "evaluator_name", inspectionDate: "inspection_date",
+      inspectionTime: "inspection_time", inspectionTimePeriod: "inspection_time_period", groupId: "group_id", entity: "entity",
+      contactPerson: "contact_person", contactPhone: "contact_phone",
+      numDeaths: "num_deaths", numInjured: "num_injured", numMissing: "num_missing", numAffected: "num_affected", victimsNotes: "victims_notes",
+      inspectionType: "inspection_type", habitability: "habitability", damageLevel: "damage_level",
+      habitabilitySuggested: "habitability_suggested", damageLevelSuggested: "damage_level_suggested", classificationOverridden: "classification_overridden",
+      previousEvaluationExists: "previous_evaluation_exists", previousEvaluationType: "previous_evaluation_type",
+      previousEvaluationEntity: "previous_evaluation_entity", previousEvaluationHabitability: "previous_evaluation_habitability", previousEvaluationDate: "previous_evaluation_date",
+      department: "department", municipality: "municipality", neighborhood: "neighborhood", areaType: "area_type",
+      latitude: "latitude", longitude: "longitude", locationSource: "location_source",
+      address: "address", buildingName: "building_name", floorsAboveGround: "floors_above_ground", basements: "basements",
+      buildingOwnership: "building_ownership", frontDimension: "front_dimension", depthDimension: "depth_dimension",
+      siteMorphology: "site_morphology", siteMorphologyOther: "site_morphology_other", waterBodyThreat: "water_body_threat",
+      waterBodyDistance: "water_body_distance", waterBodyNotes: "water_body_notes", weakStory: "weak_story",
+      shortColumn: "short_column", stiffnessChange: "stiffness_change",
+      totalCollapse: "total_collapse", partialCollapse: "partial_collapse", evidentTilt: "evident_tilt", adjacentBuildingRisk: "adjacent_building_risk",
+      soilLiquefaction: "soil_liquefaction", nearbyLandslides: "nearby_landslides",
+      occupationStatus: "occupation_status", finalComments: "final_comments",
+      evaluatorIdCode: "evaluator_id_code", evaluatorDocType: "evaluator_doc_type", evaluatorDocNumber: "evaluator_doc_number",
+      evaluatorEntity: "evaluator_entity", evaluatorDependencia: "evaluator_dependencia",
+      responsibleOfficialName: "responsible_official_name", responsibleOfficialCc: "responsible_official_cc", responsibleOfficialEntity: "responsible_official_entity",
+    };
+    const INSPECTION_BOOL_INT_FIELDS = new Set(["waterBodyThreat", "weakStory", "shortColumn", "stiffnessChange", "previousEvaluationExists", "classificationOverridden"]);
+    function applyInspectionPatchLocally(fields) {
+      if (!inspection) return;
+      for (const [key, column] of Object.entries(INSPECTION_FIELD_MAP)) {
+        if (!(key in fields)) continue;
+        let value = fields[key];
+        if (value === "") value = null;
+        else if (INSPECTION_BOOL_INT_FIELDS.has(key) && value !== null) value = value === true || value === 1 || value === "1" || value === "true" ? 1 : 0;
+        inspection[column] = value;
+      }
+      inspection.updated_at = new Date().toISOString();
+      cacheInspectionLocally(inspection);
+    }
+    /** Igual que arriba, para los grupos de selección múltiple (secciones 1, 4, 5.1-5.4, 14) -- cada uno tiene su propio endpoint PUT .../<grupo> con { items }, y el nombre del campo en `inspection` es el mismo que en el wizard (sin conversión). */
+    function applyGroupReplaceLocally(fieldName, items) {
+      if (!inspection) return;
+      inspection[fieldName] = items;
+      cacheInspectionLocally(inspection);
+    }
     /**
      * Recarga catálogo + inspección. NUNCA debe lanzar: se llama desde varios
      * sitios como `await loadAll()` sin su propio try/catch (goToStep, el
@@ -304,6 +356,13 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
         // ya hecho en una inspección que sí se alcanzó a abrir antes.
         inspection = readLocalInspectionCache(inspectionId) || BLANK_INSPECTION_STUB();
       }
+      // Espejo público de solo lectura para scripts inyectados externamente
+      // (ver eval-danos-edificaciones-apk*/native-shim.js): `catalog` e
+      // `inspection` son `let` de este bloque de script, no propiedades de
+      // `window`, así que un script cargado aparte no podría verlas por su
+      // nombre de forma confiable. Esto no cambia nada del comportamiento de
+      // la app -- es solo una forma segura de exponer el estado ya cargado.
+      window.__inspectionState = { inspection, catalog, inspectionId };
     }
 
     function setSaveStatus(text) {
@@ -401,6 +460,7 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
     async function patchInspection(fields) {
       if (Object.keys(fields).length === 0) return;
       await api(`/inspections/${inspectionId}`, { method: "PATCH", body: JSON.stringify(fields) });
+      applyInspectionPatchLocally(fields);
     }
     function sectionCard(title, innerHtml, subtitle) {
       return `<div class="card p-5 mb-4">
@@ -460,7 +520,9 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
       payload.inspectionType = chipRadioValue(document, "inspectionType");
       rememberEvaluatorName(payload.evaluatorName);
       await patchInspection(payload);
-      await api(`/inspections/${inspectionId}/threat-types`, { method: "PUT", body: JSON.stringify({ items: readCheckboxGroup(document, "threatTypes") }) });
+      const threatTypesItems = readCheckboxGroup(document, "threatTypes");
+      await api(`/inspections/${inspectionId}/threat-types`, { method: "PUT", body: JSON.stringify({ items: threatTypesItems }) });
+      applyGroupReplaceLocally("threatTypes", threatTypesItems);
     }
 
     // ===========================================================================
@@ -570,11 +632,21 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
       const payload = cleanPayload(formPayload(), groups);
       payload.buildingOwnership = chipRadioValue(document, "buildingOwnership");
       await patchInspection(payload);
-      await api(`/inspections/${inspectionId}/building-uses`, { method: "PUT", body: JSON.stringify({ items: readCheckboxGroup(document, "buildingUses") }) });
-      await api(`/inspections/${inspectionId}/structural-systems`, { method: "PUT", body: JSON.stringify({ items: readCheckboxGroup(document, "structuralSystems") }) });
-      await api(`/inspections/${inspectionId}/floor-systems`, { method: "PUT", body: JSON.stringify({ items: readCheckboxGroup(document, "floorSystems") }) });
-      await api(`/inspections/${inspectionId}/roof-support-systems`, { method: "PUT", body: JSON.stringify({ items: readCheckboxGroup(document, "roofSupportSystems") }) });
-      await api(`/inspections/${inspectionId}/roof-types`, { method: "PUT", body: JSON.stringify({ items: readCheckboxGroup(document, "roofTypes") }) });
+      const buildingUsesItems = readCheckboxGroup(document, "buildingUses");
+      await api(`/inspections/${inspectionId}/building-uses`, { method: "PUT", body: JSON.stringify({ items: buildingUsesItems }) });
+      applyGroupReplaceLocally("buildingUses", buildingUsesItems);
+      const structuralSystemsItems = readCheckboxGroup(document, "structuralSystems");
+      await api(`/inspections/${inspectionId}/structural-systems`, { method: "PUT", body: JSON.stringify({ items: structuralSystemsItems }) });
+      applyGroupReplaceLocally("structuralSystems", structuralSystemsItems);
+      const floorSystemsItems = readCheckboxGroup(document, "floorSystems");
+      await api(`/inspections/${inspectionId}/floor-systems`, { method: "PUT", body: JSON.stringify({ items: floorSystemsItems }) });
+      applyGroupReplaceLocally("floorSystems", floorSystemsItems);
+      const roofSupportSystemsItems = readCheckboxGroup(document, "roofSupportSystems");
+      await api(`/inspections/${inspectionId}/roof-support-systems`, { method: "PUT", body: JSON.stringify({ items: roofSupportSystemsItems }) });
+      applyGroupReplaceLocally("roofSupportSystems", roofSupportSystemsItems);
+      const roofTypesItems = readCheckboxGroup(document, "roofTypes");
+      await api(`/inspections/${inspectionId}/roof-types`, { method: "PUT", body: JSON.stringify({ items: roofTypesItems }) });
+      applyGroupReplaceLocally("roofTypes", roofTypesItems);
     }
 
     // ===========================================================================
@@ -1091,7 +1163,9 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
       const payload = cleanPayload(formPayload(), ["safetyRecommendations"]);
       payload.occupationStatus = chipRadioValue(document, "occupationStatus");
       await patchInspection(payload);
-      await api(`/inspections/${inspectionId}/safety-recommendations`, { method: "PUT", body: JSON.stringify({ items: readCheckboxGroup(document, "safetyRecommendations") }) });
+      const safetyRecommendationsItems = readCheckboxGroup(document, "safetyRecommendations");
+      await api(`/inspections/${inspectionId}/safety-recommendations`, { method: "PUT", body: JSON.stringify({ items: safetyRecommendationsItems }) });
+      applyGroupReplaceLocally("safetyRecommendations", safetyRecommendationsItems);
     }
 
     // ===========================================================================

@@ -5,7 +5,7 @@
 // arriesgar mostrar datos desactualizados cuando sí hay conexión. Las
 // escrituras (POST/PUT/PATCH/DELETE) NO pasan por aquí — las maneja la cola
 // de sincronización en IndexedDB (ver public/offline.js).
-const CACHE_VERSION = "v16"; // v16: detección de "sin red" en api() ya no depende de instanceof TypeError (falla real en APK: DNS)
+const CACHE_VERSION = "v17"; // v17: persistencia local real por cada paso del wizard, no solo severidad/daños
 const SHELL_CACHE = `shell-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `runtime-${CACHE_VERSION}`;
 
