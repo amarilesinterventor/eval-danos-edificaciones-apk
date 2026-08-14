@@ -157,6 +157,38 @@ cambie" más abajo.
   respuestas JSON reales de la API y cualquier error de JS) — presta atención a si las peticiones GET
   (`Handling CapacitorHttp request: .../_capacitor_http_interceptor_?u=...`) realmente ocurren cada vez
   que deberían, no solo las escrituras.
+- **Sin conexión de verdad (no solo un error puntual) la app se veía "bloqueada" y no guardaba nada**:
+  reportado en campo. Las dos correcciones anteriores resolvían fallas puntuales de red, pero nunca se
+  había probado una desconexión TOTAL de principio a fin. Con eso, aparecieron dos problemas reales
+  distintos, ambos corregidos directamente en el repo web (`inspection.html`) porque son bugs genuinos, no
+  parches de este empaque:
+  1. **El catálogo no tenía ningún respaldo local.** `loadAll()` ya no lanzaba sin capturar (corrección
+     anterior), pero sin red el catálogo caía a un stub vacío -- el wizard se quedaba sin ninguna opción
+     para elegir en ningún paso. Corregido con `catalog-offline.json`: un archivo estático generado por
+     [`scripts/gen-catalog-offline.mjs`](scripts/gen-catalog-offline.mjs) a partir de la MISMA
+     `getFullCatalog()` del servidor (nunca puede quedar desincronizado a mano), servido como asset local
+     (no pasa por `/api/`, así que `native-shim.js` no lo toca) e integrado al paso `sync-web`. `loadAll()`
+     lo intenta antes de rendirse al catálogo vacío.
+  2. **Las escrituras se encolaban bien, pero la pantalla no lo reflejaba.** `offline.js` sí guardaba en
+     IndexedDB cada PUT/POST/PATCH que fallaba por red -- eso nunca falló. El problema era que, después de
+     encolar, el código siempre llamaba a `loadAll()` para refrescar la pantalla, y esa recarga (un GET)
+     volvía a fallar por la misma falta de red, sin ninguna forma de "ver" la escritura recién encolada.
+     Resultado: tocar una severidad o guardar un daño parecía no hacer nada, aunque el dato sí iba a
+     sincronizar en cuanto volviera la señal. Corregido con actualización optimista
+     (`applyElementDamageLocally`, `applyDamageRecordLocally`, `applyQueuedPhotoLocally`): el cambio se
+     aplica de inmediato sobre el estado en memoria (y se recachea) antes de que `loadAll()` vuelva a
+     fallar, así el respaldo que usa `loadAll()` en su recuperación ya incluye el cambio recién hecho.
+
+  Verificado de punta a punta simulando `fetch()` fallando de verdad (`TypeError`, no un 404/501 -- un
+  servidor HTTP estático simple SÍ responde a las peticiones, solo que con el código equivocado; eso NO es
+  lo mismo que una desconexión real) contra los assets ya empaquetados del APK, sin ningún backend
+  disponible: catálogo con datos reales, severidad marcándose, daño guardándose con descripción, todo
+  visible en pantalla con el indicador "Sincronizando N…".
+
+  **Límite real que sigue existiendo, no es un bug**: generar el informe PDF final sí necesita conexión,
+  porque el PDF se arma en el servidor (`pdfkit`/`pdf-lib`), no en el celular. Los datos ya quedan
+  guardados y seguros localmente mientras tanto -- solo hay que generar el informe una vez vuelva la
+  señal.
 
 ## Cuando la app web cambie
 
