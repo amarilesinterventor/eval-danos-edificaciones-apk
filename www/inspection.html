@@ -128,6 +128,131 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
       roofTypes: [], siteMorphology: [], structuralElements: [], nonStructuralElements: [],
       safetyRecommendations: [], habitabilityMeta: {}, damageLevelMeta: {},
     });
+    // Respaldo local ante falla de red real (sin conexión, no solo un error
+    // HTTP puntual) para las dos lecturas de loadAll():
+    //  - Catálogo: es una lista estática (tipos de amenaza, usos, elementos
+    //    estructurales, etc.) que no depende de la inspección ni cambia entre
+    //    cargas. `/catalog-offline.json` es un archivo estático (NO pasa por
+    //    /api/, así que dentro del APK no se reescribe hacia el backend
+    //    remoto) que solo existe en el empaque nativo -- ver
+    //    eval-danos-edificaciones-apk/scripts/gen-catalog-offline.mjs, que lo
+    //    genera a partir de la MISMA función `getFullCatalog()` del servidor
+    //    para que nunca quede desincronizado. En la web normal este archivo
+    //    no existe (404) y simplemente se sigue de largo hacia el catálogo
+    //    vacío, como antes -- ahí ya la cubre el Service Worker.
+    //  - Inspección: se guarda en localStorage una copia de la última carga
+    //    que sí tuvo éxito, para poder seguir trabajando (aunque sea con
+    //    datos ya desactualizados) si una sesión de campo se queda sin señal
+    //    después de haber abierto la inspección al menos una vez.
+    async function fetchOfflineCatalog() {
+      const res = await fetch("/catalog-offline.json", { cache: "no-store" });
+      if (!res.ok) throw new Error("sin catálogo local embebido");
+      return res.json();
+    }
+    const INSPECTION_CACHE_KEY = (id) => `edificaciones_inspection_cache_${id}`;
+    function cacheInspectionLocally(insp) {
+      try {
+        localStorage.setItem(INSPECTION_CACHE_KEY(insp.id), JSON.stringify(insp));
+      } catch (err) {
+        // localStorage lleno o no disponible: no es crítico, solo se pierde el respaldo offline.
+      }
+    }
+    function readLocalInspectionCache(id) {
+      try {
+        const raw = localStorage.getItem(INSPECTION_CACHE_KEY(id));
+        return raw ? JSON.parse(raw) : null;
+      } catch (err) {
+        return null;
+      }
+    }
+    /**
+     * Actualización optimista: cuando `api()` encola una escritura sin
+     * conexión (`{queued:true}`, ver app.js/offline.js), el cambio SÍ quedó
+     * guardado para sincronizar más tarde, pero el `loadAll()` que sigue no
+     * tiene forma de verlo (vuelve a intentar el GET, que también falla, y
+     * cae al respaldo local -- que todavía no incluye este cambio). Sin
+     * esto, la pantalla parecía ignorar el clic aunque el dato sí quedara en
+     * cola (bug real detectado en campo: "no guarda los registros"). Se
+     * aplica el cambio directamente sobre `inspection` en memoria y se
+     * vuelve a cachear de inmediato, para que si `loadAll()` falla y cae al
+     * respaldo, recupere exactamente esta versión ya actualizada.
+     */
+    function applyElementDamageLocally(code, category, severity) {
+      if (!inspection) return;
+      const list = inspection.elementDamages || (inspection.elementDamages = []);
+      const existing = list.find((d) => d.element_code === code);
+      const now = new Date().toISOString();
+      if (existing) {
+        existing.category = category;
+        existing.severity = severity;
+        existing.updated_at = now;
+      } else {
+        list.push({ id: window.newClientId ? window.newClientId() : `local-${code}-${now}`, inspection_id: inspectionId, element_code: code, category, severity, other_label: null, created_at: now, updated_at: now });
+      }
+      cacheInspectionLocally(inspection);
+    }
+    /** Mismo respaldo optimista que `applyElementDamageLocally`, para el modal de detalle de daño (paso 5). */
+    function applyDamageRecordLocally(recordId, payload) {
+      if (!inspection || !recordId) return;
+      const list = inspection.damageRecords || (inspection.damageRecords = []);
+      const now = new Date().toISOString();
+      const idx = list.findIndex((d) => d.id === recordId);
+      const prev = idx >= 0 ? list[idx] : null;
+      const merged = {
+        id: recordId,
+        inspection_id: inspectionId,
+        element_damage_id: payload.elementDamageId ?? prev?.element_damage_id ?? null,
+        element_label: payload.elementLabel ?? prev?.element_label ?? "",
+        location: payload.location ?? prev?.location ?? "",
+        damage_type: payload.damageType ?? prev?.damage_type ?? "",
+        description: payload.description ?? prev?.description ?? "",
+        extent: payload.extent ?? prev?.extent ?? "",
+        recommendation: payload.recommendation ?? prev?.recommendation ?? "",
+        photos: prev?.photos ?? [],
+        created_at: prev?.created_at ?? now,
+        updated_at: now,
+      };
+      if (idx >= 0) list[idx] = merged;
+      else list.push(merged);
+      cacheInspectionLocally(inspection);
+    }
+    /**
+     * Foto subida sin conexión: `uploadPhoto()` (app.js) la encola igual que
+     * cualquier otra escritura (ver api()/offline.js), pero al quedar
+     * encolada no hay ninguna URL real todavía (el servidor es quien la
+     * genera al guardar el archivo). Se agrega una vista previa local (URL
+     * de blob, propia de esta pestaña) para que la foto se vea reflejada de
+     * inmediato -- antes, quedaba fuera de la pantalla hasta sincronizar
+     * (bug real detectado en campo: "no refleja las fotos tomadas"). Esta
+     * vista previa NO se guarda en el respaldo de localStorage (un blob:
+     * URL no sobrevive un recargue de página) -- dura mientras la pestaña
+     * siga abierta; al sincronizar de verdad, `loadAll()` trae la URL real.
+     */
+    function applyQueuedPhotoLocally(file, { kind, damageRecordId = null }) {
+      if (!inspection) return;
+      const now = new Date().toISOString();
+      const photo = {
+        id: window.newClientId ? window.newClientId() : `local-photo-${now}`,
+        inspection_id: inspectionId,
+        damage_record_id: damageRecordId,
+        kind,
+        url: URL.createObjectURL(file),
+        caption: null,
+        latitude: null,
+        longitude: null,
+        taken_at: now,
+        created_at: now,
+      };
+      inspection.photos = inspection.photos || [];
+      inspection.photos.push(photo);
+      if (damageRecordId) {
+        const dr = (inspection.damageRecords || []).find((d) => d.id === damageRecordId);
+        if (dr) {
+          dr.photos = dr.photos || [];
+          dr.photos.push(photo);
+        }
+      }
+    }
     /**
      * Recarga catálogo + inspección. NUNCA debe lanzar: se llama desde varios
      * sitios como `await loadAll()` sin su propio try/catch (goToStep, el
@@ -140,21 +265,33 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
      * real detectado en campo: el dato sí llegaba a guardarse en el
      * servidor, pero nada en la pantalla lo reflejaba). Ver
      * docs/ANALISIS-Y-ARQUITECTURA.md para el detalle del diagnóstico.
+     *
+     * Segunda vuelta de este mismo bug, también detectada en campo: sin
+     * conexión de verdad (no solo un error puntual), el catálogo y la
+     * inspección caían al stub vacío -- lo que evitaba el cuelgue silencioso,
+     * pero dejaba el wizard inutilizable (sin opciones que elegir, sin los
+     * datos ya cargados de la inspección). Los respaldos locales de abajo
+     * resuelven eso.
      */
     async function loadAll() {
       try {
         catalog = await api("/catalog");
       } catch (err) {
-        // El catálogo es una lista estática (tipos de amenaza, usos, etc.)
-        // que casi nunca cambia entre una carga y la siguiente — ante una
-        // falla puntual, es más seguro seguir con la última copia que sí
-        // cargó bien (o un catálogo vacío si nunca cargó ninguna) que dejar
-        // que el error interrumpa el resto de la función.
-        if (!catalog) catalog = BLANK_CATALOG_STUB();
+        try {
+          catalog = await fetchOfflineCatalog();
+        } catch (err2) {
+          // El catálogo es una lista estática (tipos de amenaza, usos, etc.)
+          // que casi nunca cambia entre una carga y la siguiente — ante una
+          // falla puntual, es más seguro seguir con la última copia que sí
+          // cargó bien (o un catálogo vacío si nunca cargó ninguna) que dejar
+          // que el error interrumpa el resto de la función.
+          if (!catalog) catalog = BLANK_CATALOG_STUB();
+        }
       }
       try {
         const res = await api(`/inspections/${inspectionId}`);
         inspection = res.inspection || BLANK_INSPECTION_STUB();
+        cacheInspectionLocally(inspection);
       } catch (err) {
         // `api()` lanza en cualquier respuesta no-OK, incluyendo 404 — que es
         // exactamente lo que devuelve el servidor tanto si la inspección se
@@ -162,7 +299,10 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
         // como si el registro fue eliminado de verdad. No podemos distinguir
         // los dos casos desde el cliente; se opta por el fallback tolerante
         // (permitir seguir trabajando) en vez de dejar la página en blanco.
-        inspection = BLANK_INSPECTION_STUB();
+        // Antes de rendirse a un stub vacío, se intenta la última copia
+        // conocida en este dispositivo, para no perder de vista el trabajo
+        // ya hecho en una inspección que sí se alcanzó a abrir antes.
+        inspection = readLocalInspectionCache(inspectionId) || BLANK_INSPECTION_STUB();
       }
     }
 
@@ -559,11 +699,13 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
           const code = btn.dataset.elementCode;
           const severity = btn.dataset.severity;
           const isStructural = structural.some((s) => s.code === code);
+          const category = isStructural ? "ESTRUCTURAL" : "NO_ESTRUCTURAL";
           setSaveStatus("Guardando…");
           await api(`/inspections/${inspectionId}/element-damages/${code}`, {
             method: "PUT",
-            body: JSON.stringify({ category: isStructural ? "ESTRUCTURAL" : "NO_ESTRUCTURAL", severity }),
+            body: JSON.stringify({ category, severity }),
           });
+          applyElementDamageLocally(code, category, severity);
           await loadAll();
           renderStep5(container);
           setSaveStatus("Guardado");
@@ -796,9 +938,11 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
           record = (await api(`/inspections/${inspectionId}/damage-records`, { method: "POST", body: JSON.stringify(payload) })).damageRecord;
           damageModalCtx.damageRecordId = record?.id || payload.id;
         }
+        applyDamageRecordLocally(damageModalCtx.damageRecordId, payload);
         // Subir todas las fotos pendientes ahora que el registro ya existe.
         for (const file of damageModalPendingPhotos) {
-          await uploadPhoto(inspectionId, file, { kind: "DANIO", damageRecordId: damageModalCtx.damageRecordId });
+          const photoRes = await uploadPhoto(inspectionId, file, { kind: "DANIO", damageRecordId: damageModalCtx.damageRecordId });
+          if (photoRes?.queued) applyQueuedPhotoLocally(file, { kind: "DANIO", damageRecordId: damageModalCtx.damageRecordId });
         }
         damageModalPendingPhotos = [];
         await loadAll();
@@ -879,7 +1023,9 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
         input.addEventListener("change", async (e) => {
           const file = e.target.files[0];
           if (!file) return;
-          await uploadPhoto(inspectionId, file, { kind: input.dataset.sketch === "PLANTA" ? "ESQUEMA_PLANTA" : "ESQUEMA_ELEVACION" });
+          const kind = input.dataset.sketch === "PLANTA" ? "ESQUEMA_PLANTA" : "ESQUEMA_ELEVACION";
+          const photoRes = await uploadPhoto(inspectionId, file, { kind });
+          if (photoRes?.queued) applyQueuedPhotoLocally(file, { kind });
           await loadAll();
           renderStep6(container);
         }),

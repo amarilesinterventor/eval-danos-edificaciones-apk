@@ -5,7 +5,7 @@
 // arriesgar mostrar datos desactualizados cuando sí hay conexión. Las
 // escrituras (POST/PUT/PATCH/DELETE) NO pasan por aquí — las maneja la cola
 // de sincronización en IndexedDB (ver public/offline.js).
-const CACHE_VERSION = "v13"; // v13: paso 6, numeral 11 Esquema -- dos botones explícitos: Tomar foto / Elegir de galería
+const CACHE_VERSION = "v15"; // v15: actualización optimista local (severidad, daños, fotos) al guardar sin conexión
 const SHELL_CACHE = `shell-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `runtime-${CACHE_VERSION}`;
 

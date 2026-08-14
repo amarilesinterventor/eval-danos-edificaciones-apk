@@ -58,15 +58,52 @@
       );
     }
 
+    // Respaldo local ante falla de red real (sin conexión): se guarda la
+    // última lista sin filtrar que sí llegó a cargar bien, para poder seguir
+    // encontrando/abriendo una inspección ya existente aunque en ese momento
+    // no haya señal (solo se cachea la vista "Todas", no cada filtro).
+    const INSPECTIONS_LIST_CACHE_KEY = "edificaciones_inspections_list_cache";
+    function cacheInspectionsList(inspections) {
+      try {
+        localStorage.setItem(INSPECTIONS_LIST_CACHE_KEY, JSON.stringify(inspections));
+      } catch (err) {
+        // localStorage lleno o no disponible: no es crítico, solo se pierde el respaldo offline.
+      }
+    }
+    function readInspectionsListCache() {
+      try {
+        const raw = localStorage.getItem(INSPECTIONS_LIST_CACHE_KEY);
+        return raw ? JSON.parse(raw) : null;
+      } catch (err) {
+        return null;
+      }
+    }
+
     async function load() {
       const qs = currentFilter ? `?status=${currentFilter}` : "";
-      const { inspections } = await api(`/inspections${qs}`);
       const listEl = document.getElementById("list");
+      let inspections;
+      let offline = false;
+      try {
+        ({ inspections } = await api(`/inspections${qs}`));
+        if (!currentFilter) cacheInspectionsList(inspections);
+      } catch (err) {
+        const cached = !currentFilter ? readInspectionsListCache() : null;
+        if (!cached) {
+          listEl.innerHTML = `<div class="card p-8 text-center text-sm text-slate-500">Sin conexión y todavía sin datos guardados en este dispositivo. Abre esta lista una vez con señal para poder consultarla después sin conexión.</div>`;
+          return;
+        }
+        inspections = cached;
+        offline = true;
+      }
+      const offlineNotice = offline
+        ? `<div class="card p-3 mb-2 text-xs text-amber-700 bg-amber-50 border border-amber-200">⚠️ Sin conexión — mostrando la última lista guardada en este dispositivo, puede no estar actualizada.</div>`
+        : "";
       if (!inspections.length) {
-        listEl.innerHTML = `<div class="card p-8 text-center text-sm text-slate-500">No hay inspecciones${currentFilter ? " con este estado" : ""}.</div>`;
+        listEl.innerHTML = offlineNotice + `<div class="card p-8 text-center text-sm text-slate-500">No hay inspecciones${currentFilter ? " con este estado" : ""}.</div>`;
         return;
       }
-      listEl.innerHTML = inspections
+      listEl.innerHTML = offlineNotice + inspections
         .map(
           (i) => `
         <div class="card p-4 flex items-center justify-between gap-3">

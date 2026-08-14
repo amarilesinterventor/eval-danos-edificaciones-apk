@@ -4,7 +4,7 @@
   "private": true,
   "description": "Empaque Android (Capacitor) de la Herramienta de Evaluacion Rapida de Danos en Edificaciones -- envuelve la app web ya desplegada (D:/Claude/Inspeccion Estructural) sin modificarla, para producir un APK instalable que funciona sin conexion desde el primer arranque.",
   "scripts": {
-    "sync-web": "node scripts/sync-web-assets.mjs",
+    "sync-web": "node scripts/sync-web-assets.mjs && npx tsx scripts/gen-catalog-offline.mjs",
     "prepare-android": "npm run sync-web && npx cap sync android",
     "open-android": "npx cap open android",
     "build-apk": "npm run prepare-android && node scripts/build-apk.mjs",
@@ -18,6 +18,7 @@
   },
   "devDependencies": {
     "@capacitor/assets": "^3.0.5",
-    "@capacitor/cli": "^8.5.0"
+    "@capacitor/cli": "^8.5.0",
+    "tsx": "^4.23.12"
   }
 }

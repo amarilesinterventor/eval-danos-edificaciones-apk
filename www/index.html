@@ -55,7 +55,25 @@
     renderFooter();
 
     async function load() {
-      const stats = await api("/dashboard/stats");
+      let stats;
+      try {
+        stats = await api("/dashboard/stats");
+      } catch (err) {
+        // Sin conexión (o el servidor no responde): el panel es solo un
+        // resumen -- no bloquea nada crítico, pero antes se quedaba en
+        // blanco sin explicación (la función lanzaba sin manejo de error).
+        // Se avisa y se dirige a lo que sí sigue funcionando sin señal:
+        // continuar una inspección ya abierta antes ("Inspecciones", que
+        // guarda su propia copia local) o crear una nueva.
+        document.getElementById("stats").innerHTML = "";
+        document.getElementById("habBreakdown").innerHTML = "";
+        document.getElementById("recentList").innerHTML = `
+          <div class="card p-8 text-center text-sm text-slate-500">
+            ⚠️ Sin conexión — el resumen no está disponible en este momento.<br />
+            Puedes seguir trabajando: usa <a href="/inspections.html" class="text-brand-600 hover:underline">Inspecciones</a> para continuar una que ya hayas abierto antes, o "+ Nueva inspección" para empezar una.
+          </div>`;
+        return;
+      }
 
       document.getElementById("stats").innerHTML = `
         <div class="card p-4">
