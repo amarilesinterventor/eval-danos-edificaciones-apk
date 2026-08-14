@@ -75,7 +75,15 @@ for (const file of ENTRY_HTML_FILES) {
     continue;
   }
   let html = readFileSync(path, "utf-8");
-  if (html.includes("native-shim.js")) continue;
+  // OJO: se busca la ETIQUETA <script> exacta, no solo el nombre del archivo
+  // como texto suelto -- bug real encontrado: `inspection.html` tiene un
+  // comentario que MENCIONA "native-shim.js" en prosa (referenciando este
+  // mismo mecanismo), y un `html.includes("native-shim.js")` ingenuo
+  // detectaba esa mención como si el shim ya estuviera inyectado ahí,
+  // saltándose la inyección real en esa página -- exactamente la página del
+  // wizard, donde más falta hacía (reescribir /api/... hacia el backend real
+  // y desactivar el Service Worker).
+  if (html.includes('<script src="/native-shim.js">')) continue;
   html = html.replace('<script src="/offline.js"></script>', '<script src="/native-shim.js"></script>\n  <script src="/offline.js"></script>');
   writeFileSync(path, html, "utf-8");
   console.log(`Shim inyectado en: ${file}`);
