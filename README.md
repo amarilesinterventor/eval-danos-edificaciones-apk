@@ -8,6 +8,12 @@ dispositivo real se encontró un bug genuino en `inspection.html` (compartido co
 por este empaque — ver "Solución de problemas" más abajo), que sí se corrigió directamente ahí con
 autorización explícita del usuario, porque es un arreglo real de la app, no una adaptación al empaque.
 
+> Existe una variante "local-first" de este proyecto en
+> [`eval-danos-edificaciones-apk-local`](../eval-danos-edificaciones-apk-local) — mismo código, pero cada
+> guardado va directo al dispositivo (sin ningún intento de red) cuando un latido de conectividad en
+> segundo plano ya sabe que no hay señal real, en vez de intentar la red primero y caer a la cola solo si
+> falla. Se instala aparte, sin reemplazar esta versión (appId distinto).
+
 ## Por qué existe este proyecto
 
 La app web ya es una PWA con soporte offline (service worker + cola de sincronización en IndexedDB — ver
