@@ -271,7 +271,24 @@ function photoUploadControl(dataAttrs, label = "Agregar foto") {
 // ---------------------------------------------------------------------------
 const OTHER_VALUE = "__OTHER__";
 
+/**
+ * Blindaje defensivo: convierte a `[]` cualquier valor que no sea un
+ * arreglo de verdad, en vez de dejar que `checkboxGroup`/`chipRadio`/
+ * `selectWithOther` truenen con "options is not iterable" y tumben la
+ * pantalla completa (bug real reportado en campo con la variante
+ * local-first del APK, en modo avión -- no se pudo reproducir en
+ * simulación de escritorio, y el registro de Android no conservó la traza
+ * completa del error, así que además de blindar se deja este aviso en
+ * consola con el valor real recibido, para diagnosticar la próxima vez).
+ */
+function ensureArray(value, context) {
+  if (Array.isArray(value)) return value;
+  console.error(`[ensureArray] ${context} recibió algo que no es un arreglo:`, JSON.stringify(value));
+  return [];
+}
+
 function selectWithOther(name, options, { otherName, placeholder = "Especifica cuál...", required = false, selected = "", selectedOther = "" } = {}) {
+  options = ensureArray(options, `selectWithOther("${name}")`);
   const otherFieldName = otherName ?? `${name}Other`;
   const isOtherSelected = selected === "OTRO" || selected === OTHER_VALUE;
   return `
@@ -312,6 +329,8 @@ const OPTION_IDLE_CLS = ["border-2", "border-slate-400", "bg-white", "text-slate
 const OPTION_ACTIVE_CLS = ["border-2", "border-brand-600", "bg-brand-600", "text-white", "shadow-sm"];
 
 function checkboxGroup(name, options, selectedCodes = [], otherTextByCode = {}) {
+  options = ensureArray(options, `checkboxGroup("${name}")`);
+  selectedCodes = ensureArray(selectedCodes, `checkboxGroup("${name}") selectedCodes`);
   const groups = new Map();
   for (const o of options) {
     const g = o.group || "";
@@ -366,6 +385,7 @@ function readCheckboxGroup(root, name) {
 // en campo que un <select> nativo pequeño.
 // ---------------------------------------------------------------------------
 function chipRadio(name, options, selected, { cols } = {}) {
+  options = ensureArray(options, `chipRadio("${name}")`);
   const gridCols = cols || options.length;
   return `<div class="grid gap-2" style="grid-template-columns:repeat(${gridCols},minmax(0,1fr))">
     ${options

@@ -500,7 +500,7 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
           </div>
           ${field("Tipo de inspección", chipRadio("inspectionType", [{ value: "EXTERIOR", label: "Exterior solamente" }, { value: "COMPLETA", label: "Completa" }], i.inspection_type, { cols: 2 }))}
         `)}
-        ${sectionCard("Tipo de amenaza", `<div id="threatTypesGroup">${checkboxGroup("threatTypes", catalog.threatTypes, i.threatTypes.map((t) => t.code), Object.fromEntries(i.threatTypes.map((t) => [t.code, t.otherText])))}</div>`, "Selecciona todas las que apliquen.")}
+        ${sectionCard("Tipo de amenaza", `<div id="threatTypesGroup">${checkboxGroup("threatTypes", catalog.threatTypes, (i.threatTypes || []).map((t) => t.code), Object.fromEntries((i.threatTypes || []).map((t) => [t.code, t.otherText])))}</div>`, "Selecciona todas las que apliquen.")}
         ${sectionCard("Víctimas y afectación humana", `
           <div class="grid grid-cols-2 gap-3">
             ${field("Muertos", `<input name="numDeaths" type="number" min="0" inputmode="numeric" class="field-input" value="${i.num_deaths ?? ""}" />`)}
@@ -608,7 +608,7 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
         ${sectionCard("4. Identificación de la edificación", `
           ${field("Dirección", `<input name="address" class="field-input" value="${escapeHtml(i.address || "")}" />`)}
           ${field("Nombre de la edificación", `<input name="buildingName" class="field-input" value="${escapeHtml(i.building_name || "")}" />`)}
-          <div class="mb-4"><label class="field-label">Uso de la edificación</label>${checkboxGroup("buildingUses", catalog.buildingUses, i.buildingUses.map((u) => u.code), Object.fromEntries(i.buildingUses.map((u) => [u.code, u.otherText])))}</div>
+          <div class="mb-4"><label class="field-label">Uso de la edificación</label>${checkboxGroup("buildingUses", catalog.buildingUses, (i.buildingUses || []).map((u) => u.code), Object.fromEntries((i.buildingUses || []).map((u) => [u.code, u.otherText])))}</div>
           <div class="grid grid-cols-2 gap-3">
             ${field("Núm. pisos sobre el suelo", `<input name="floorsAboveGround" type="number" min="0" class="field-input" value="${i.floors_above_ground ?? ""}" />`)}
             ${field("Núm. sótanos", `<input name="basements" type="number" min="0" class="field-input" value="${i.basements ?? ""}" />`)}
@@ -619,10 +619,10 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
             ${field("Fondo (m)", `<input name="depthDimension" type="number" step="any" min="0" class="field-input" value="${i.depth_dimension ?? ""}" />`)}
           </div>
         `)}
-        ${sectionCard("5.1 Sistema estructural", checkboxGroup("structuralSystems", catalog.structuralSystems, i.structuralSystems.map((s) => s.code), Object.fromEntries(i.structuralSystems.map((s) => [s.code, s.otherText]))))}
-        ${sectionCard("5.2 Sistema de entrepiso", checkboxGroup("floorSystems", catalog.floorSystems, i.floorSystems.map((s) => s.code), Object.fromEntries(i.floorSystems.map((s) => [s.code, s.otherText]))))}
-        ${sectionCard("5.3 Sistema de soporte de la cubierta", checkboxGroup("roofSupportSystems", catalog.roofSupportSystems, i.roofSupportSystems.map((s) => s.code), Object.fromEntries(i.roofSupportSystems.map((s) => [s.code, s.otherText]))))}
-        ${sectionCard("5.4 Tipo de cubierta", checkboxGroup("roofTypes", catalog.roofTypes, i.roofTypes.map((s) => s.code), Object.fromEntries(i.roofTypes.map((s) => [s.code, s.otherText]))))}
+        ${sectionCard("5.1 Sistema estructural", checkboxGroup("structuralSystems", catalog.structuralSystems, (i.structuralSystems || []).map((s) => s.code), Object.fromEntries((i.structuralSystems || []).map((s) => [s.code, s.otherText]))))}
+        ${sectionCard("5.2 Sistema de entrepiso", checkboxGroup("floorSystems", catalog.floorSystems, (i.floorSystems || []).map((s) => s.code), Object.fromEntries((i.floorSystems || []).map((s) => [s.code, s.otherText]))))}
+        ${sectionCard("5.3 Sistema de soporte de la cubierta", checkboxGroup("roofSupportSystems", catalog.roofSupportSystems, (i.roofSupportSystems || []).map((s) => s.code), Object.fromEntries((i.roofSupportSystems || []).map((s) => [s.code, s.otherText]))))}
+        ${sectionCard("5.4 Tipo de cubierta", checkboxGroup("roofTypes", catalog.roofTypes, (i.roofTypes || []).map((s) => s.code), Object.fromEntries((i.roofTypes || []).map((s) => [s.code, s.otherText]))))}
       </form>`;
       bindChipRadio(container);
       bindCheckboxGroup(container);
@@ -1146,7 +1146,7 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
     function renderStep7(container) {
       const i = inspection;
       const hasSavedRecommendations = (i.safetyRecommendations || []).length > 0;
-      const selectedCodes = hasSavedRecommendations ? i.safetyRecommendations.map((r) => r.code) : suggestedSafetyRecommendationCodes(i);
+      const selectedCodes = hasSavedRecommendations ? (i.safetyRecommendations || []).map((r) => r.code) : suggestedSafetyRecommendationCodes(i);
       const subtitle = hasSavedRecommendations
         ? "Puedes agregar o quitar según corresponda."
         : selectedCodes.length
@@ -1154,7 +1154,7 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
           : "Selecciona las que apliquen.";
       container.innerHTML = `<form id="stepForm">
         ${sectionCard("13. Ocupación de la edificación", chipRadio("occupationStatus", [{ value: "OCUPADA", label: "Ocupada" }, { value: "DESOCUPADA", label: "Desocupada" }], i.occupation_status, { cols: 2 }))}
-        ${sectionCard("14. Recomendaciones y medidas de seguridad", checkboxGroup("safetyRecommendations", catalog.safetyRecommendations, selectedCodes, Object.fromEntries(i.safetyRecommendations.map((r) => [r.code, r.otherText]))), subtitle)}
+        ${sectionCard("14. Recomendaciones y medidas de seguridad", checkboxGroup("safetyRecommendations", catalog.safetyRecommendations, selectedCodes, Object.fromEntries((i.safetyRecommendations || []).map((r) => [r.code, r.otherText]))), subtitle)}
       </form>`;
       bindChipRadio(container);
       bindCheckboxGroup(container);
@@ -1269,7 +1269,10 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
       .catch((err) => {
         // Última red de seguridad: si algo falla incluso antes de tener un
         // catálogo/inspección utilizable (p.ej. /api/catalog caído), no dejar
-        // la página en blanco sin explicación.
+        // la página en blanco sin explicación. Se registra la traza completa
+        // (no solo err.message, que es lo único que se ve en pantalla) para
+        // poder diagnosticar por adb logcat sin tener que reproducir a ciegas.
+        console.error("[bootstrap] loadAll()/render inicial falló:", err && err.stack ? err.stack : err);
         document.getElementById("stepContent").innerHTML = `
           <div class="card p-6 text-center">
             <p class="text-sm text-red-600 mb-3">No se pudo cargar la inspección: ${escapeHtml(err.message)}</p>
