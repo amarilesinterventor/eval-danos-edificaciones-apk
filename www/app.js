@@ -25,22 +25,35 @@ function rememberEvaluatorName(name) {
 async function api(path, options = {}) {
   const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
   const method = (options.method || "GET").toUpperCase();
+  const isMutation = method !== "GET";
 
+  // La llamada a fetch() en sí (antes de recibir CUALQUIER respuesta) va en
+  // su propio try/catch, separado de la revisión de `res.ok` de abajo. Así
+  // se distingue sin ambigüedad "no hubo red" (falla acá) de "el servidor
+  // respondió con un error real" (falla más abajo, con respuesta en mano).
+  //
+  // Antes se usaba `err instanceof TypeError` para esa distinción -- funciona
+  // en un navegador normal (fetch() siempre lanza TypeError si no hay red),
+  // pero NO dentro del APK: ahí fetch() pasa por el puente nativo de
+  // Capacitor (ver native-shim.js), y una falla de red real ahí (p.ej. DNS
+  // que no resuelve) puede rechazar con otro tipo de error, no un TypeError
+  // -- bug real detectado en campo: "No se pudo guardar: Unable to resolve
+  // host ... No address associated with hostname" se mostraba como si fuera
+  // un error del servidor, en vez de encolarse para sincronizar después.
+  let res;
   try {
-    const res = await fetch(`/api${path}`, { ...options, headers });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || `Error ${res.status}`);
-    return data;
+    res = await fetch(`/api${path}`, { ...options, headers });
   } catch (err) {
-    const isNetworkError = err instanceof TypeError; // fetch lanza TypeError cuando no hay red, no cuando el servidor responde con error HTTP
-    const isMutation = method !== "GET";
-    if (isNetworkError && isMutation && window.offlineQueue) {
+    if (isMutation && window.offlineQueue) {
       await window.offlineQueue.enqueue({ path, method, body: options.body ? JSON.parse(options.body) : null, headers });
       window.dispatchEvent(new CustomEvent("offline-queued"));
       return { queued: true };
     }
     throw err;
   }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Error ${res.status}`); // el servidor sí respondió -- error real, no de red
+  return data;
 }
 
 // ---------------------------------------------------------------------------
