@@ -99,6 +99,7 @@
   <script src="/offline.js"></script>
   <script src="/local-index.js"></script>
   <script src="/classification-client.js"></script>
+  <script src="/photo-blob-store.js"></script>
   <script src="/colombia.js"></script>
   <script src="/pathology-guide.js"></script>
   <script src="/app.js"></script>
@@ -152,9 +153,68 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
       return res.json();
     }
     const INSPECTION_CACHE_KEY = (id) => `edificaciones_inspection_cache_${id}`;
+    // Marcador que reemplaza el dataURL real de una foto local dentro de lo
+    // que se guarda en localStorage (ver stripHeavyPhotoUrls/rehydratePhotoUrls
+    // abajo) -- los bytes de verdad viven en IndexedDB (photo-blob-store.js),
+    // esto solo indica "hay que ir a buscarla allá" al releer el caché.
+    const LOCAL_PHOTO_PLACEHOLDER = "local-photo-pending-rehydrate";
+    /**
+     * Copia liviana de `insp` para cachear en localStorage: los dataURL de
+     * fotos guardadas localmente (ver applyQueuedPhotoLocally) pueden pesar
+     * cientos de KB cada uno -- embebidos tal cual en este mismo JSON
+     * agotaban la cuota total de localStorage después de solo un puñado de
+     * fotos, y esa falla quedaba silenciada por el try/catch de
+     * cacheInspectionLocally (pensado para un respaldo de baja criticidad,
+     * no para ser el ÚNICO lugar donde vive el dato) -- bug real reportado en
+     * campo: "ya no deja cargar ninguna foto", sin ningún aviso, porque a
+     * partir de ahí CUALQUIER guardado posterior fallaba en silencio, no
+     * solo las fotos. El objeto `insp` en memoria (y lo que ve el resto del
+     * código -- galería, informes) conserva el dataURL completo siempre;
+     * solo esta copia para localStorage lo reemplaza por un marcador.
+     */
+    function stripHeavyPhotoUrls(insp) {
+      const clone = JSON.parse(JSON.stringify(insp));
+      const strip = (photos) => {
+        for (const p of photos || []) {
+          if (p.url && p.url.startsWith("data:")) {
+            // Migración: una foto guardada por una versión anterior de la
+            // app (antes de que existiera photo-blob-store.js) puede llegar
+            // acá con su dataURL real todavía sin respaldo en IndexedDB. Se
+            // dispara un guardado "de paso" (sin esperarlo -- este método es
+            // síncrono a propósito) antes de reemplazarla por el marcador,
+            // para no perder esa foto en el próximo guardado. put() es
+            // idempotente, así que no hay problema en llamarlo de más para
+            // una foto que ya estaba respaldada.
+            window.photoBlobStore?.put(p.id, p.url).catch(() => {});
+            p.url = LOCAL_PHOTO_PLACEHOLDER;
+          }
+        }
+      };
+      strip(clone.photos);
+      for (const dr of clone.damageRecords || []) strip(dr.photos);
+      return clone;
+    }
+    /** Recupera desde IndexedDB los dataURL reemplazados por stripHeavyPhotoUrls. */
+    async function rehydratePhotoUrls(insp) {
+      if (!window.photoBlobStore) return;
+      const rehydrate = async (photos) => {
+        for (const p of photos || []) {
+          if (p.url === LOCAL_PHOTO_PLACEHOLDER) {
+            try {
+              const dataUrl = await window.photoBlobStore.get(p.id);
+              if (dataUrl) p.url = dataUrl;
+            } catch (err) {
+              // no se pudo recuperar esta foto puntual -- se deja el marcador, no rompe el resto
+            }
+          }
+        }
+      };
+      await rehydrate(insp.photos);
+      for (const dr of insp.damageRecords || []) await rehydrate(dr.photos);
+    }
     function cacheInspectionLocally(insp) {
       try {
-        localStorage.setItem(INSPECTION_CACHE_KEY(insp.id), JSON.stringify(insp));
+        localStorage.setItem(INSPECTION_CACHE_KEY(insp.id), JSON.stringify(stripHeavyPhotoUrls(insp)));
       } catch (err) {
         // localStorage lleno o no disponible: no es crítico, solo se pierde el respaldo offline.
       }
@@ -163,13 +223,26 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
       // depender de un GET exitoso al servidor (ver local-index.js).
       window.localInspectionsIndex?.upsert(insp);
     }
-    function readLocalInspectionCache(id) {
+    async function readLocalInspectionCache(id) {
       try {
         const raw = localStorage.getItem(INSPECTION_CACHE_KEY(id));
-        return raw ? JSON.parse(raw) : null;
+        if (!raw) return null;
+        const insp = JSON.parse(raw);
+        await rehydratePhotoUrls(insp);
+        return insp;
       } catch (err) {
         return null;
       }
+    }
+    /** Contraparte de applyQueuedPhotoLocally: quita una foto del estado local (memoria + caché + IndexedDB) cuando se borra. */
+    function applyPhotoDeleteLocally(photoId) {
+      if (!inspection || !photoId) return;
+      if (inspection.photos) inspection.photos = inspection.photos.filter((p) => p.id !== photoId);
+      for (const dr of inspection.damageRecords || []) {
+        if (dr.photos) dr.photos = dr.photos.filter((p) => p.id !== photoId);
+      }
+      window.photoBlobStore?.remove(photoId).catch(() => {});
+      cacheInspectionLocally(inspection);
     }
     /**
      * Actualización optimista: cuando `api()` encola una escritura sin
@@ -250,8 +323,22 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
       if (!inspection) return;
       const now = new Date().toISOString();
       const dataUrl = await resizeImageToDataUrl(file);
+      const id = window.newClientId ? window.newClientId() : `local-photo-${now}`;
+      // Bytes de la foto -> IndexedDB (ver photo-blob-store.js/nota arriba).
+      // Si esto llega a fallar (dispositivo con IndexedDB deshabilitado o
+      // sin cuota disponible ahí tampoco), se sigue de largo igual: el
+      // dataURL queda en el objeto `photo` en memoria de todos modos, así
+      // que la foto se ve bien en esta sesión -- solo se arriesga no
+      // sobrevivir un cierre completo de la app, en vez de romper el guardado.
+      if (window.photoBlobStore) {
+        try {
+          await window.photoBlobStore.put(id, dataUrl);
+        } catch (err) {
+          console.error("[applyQueuedPhotoLocally] no se pudo guardar la foto en IndexedDB:", err);
+        }
+      }
       const photo = {
-        id: window.newClientId ? window.newClientId() : `local-photo-${now}`,
+        id,
         inspection_id: inspectionId,
         damage_record_id: damageRecordId,
         kind,
@@ -375,7 +462,7 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
         // Antes de rendirse a un stub vacío, se intenta la última copia
         // conocida en este dispositivo, para no perder de vista el trabajo
         // ya hecho en una inspección que sí se alcanzó a abrir antes.
-        const cached = readLocalInspectionCache(inspectionId);
+        const cached = await readLocalInspectionCache(inspectionId);
         inspection = cached || BLANK_INSPECTION_STUB();
         // Si no había nada cacheado todavía (p.ej. una inspección recién
         // creada con "+ Nueva" que nunca llegó a contactar al servidor -- el
@@ -911,6 +998,7 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
       el.querySelectorAll(".existing-photo-delete-btn").forEach((btn) =>
         btn.addEventListener("click", async () => {
           await api(`/photos/${btn.dataset.id}`, { method: "DELETE" });
+          applyPhotoDeleteLocally(btn.dataset.id);
           damageModalCtx.existingPhotos = damageModalCtx.existingPhotos.filter((p) => p.id !== btn.dataset.id);
           renderDamagePhotosPreview();
         }),
@@ -932,6 +1020,7 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
       root.querySelectorAll(".delete-photo-btn").forEach((btn) =>
         btn.addEventListener("click", async () => {
           await api(`/photos/${btn.dataset.id}`, { method: "DELETE" });
+          applyPhotoDeleteLocally(btn.dataset.id);
           await loadAll();
           onDone?.();
         }),

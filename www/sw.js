@@ -5,7 +5,7 @@
 // arriesgar mostrar datos desactualizados cuando sí hay conexión. Las
 // escrituras (POST/PUT/PATCH/DELETE) NO pasan por aquí — las maneja la cola
 // de sincronización en IndexedDB (ver public/offline.js).
-const CACHE_VERSION = "v20"; // v20: índice local de inspecciones + motor de clasificación local + fotos offline durables (dataURL)
+const CACHE_VERSION = "v21"; // v21: bytes de foto local en IndexedDB (no en localStorage) -- evita agotar la cuota y que los guardados fallen en silencio
 const SHELL_CACHE = `shell-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `runtime-${CACHE_VERSION}`;
 
@@ -18,6 +18,7 @@ const SHELL_ASSETS = [
   "/offline.js",
   "/local-index.js",
   "/classification-client.js",
+  "/photo-blob-store.js",
   "/colombia.js",
   "/pathology-guide.js",
   "/styles.css",
