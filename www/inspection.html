@@ -64,7 +64,7 @@
             <button type="button" id="damagePhotoGalleryBtn" class="chip-btn border-2 border-slate-400 bg-white text-slate-800">🖼️ Elegir de galería</button>
           </div>
           <input type="file" accept="image/*" capture="environment" id="damagePhotoCameraInput" class="hidden" />
-          <input type="file" accept="image/*" id="damagePhotoGalleryInput" class="hidden" />
+          <input type="file" accept="image/*" multiple id="damagePhotoGalleryInput" class="hidden" />
           <p class="text-xs text-slate-400 mt-1.5">Las fotos se suben al guardar el daño — puedes agregar varias antes de guardar.</p>
         </div>
         <div class="flex justify-end gap-2 pt-2">
@@ -325,16 +325,19 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
       const dataUrl = await resizeImageToDataUrl(file);
       const id = window.newClientId ? window.newClientId() : `local-photo-${now}`;
       // Bytes de la foto -> IndexedDB (ver photo-blob-store.js/nota arriba).
-      // Si esto llega a fallar (dispositivo con IndexedDB deshabilitado o
-      // sin cuota disponible ahí tampoco), se sigue de largo igual: el
-      // dataURL queda en el objeto `photo` en memoria de todos modos, así
-      // que la foto se ve bien en esta sesión -- solo se arriesga no
-      // sobrevivir un cierre completo de la app, en vez de romper el guardado.
+      // Si esto llega a fallar (caso raro: el dispositivo se quedó sin
+      // espacio de almacenamiento libre, o tiene IndexedDB deshabilitado),
+      // se sigue de largo igual -- el dataURL queda en el objeto `photo` en
+      // memoria de todos modos, así que la foto se ve y se puede usar en
+      // esta misma sesión (incluido el informe) -- pero SÍ se avisa de forma
+      // visible en vez de fallar en silencio otra vez: esa foto puntual
+      // arriesga no sobrevivir a que se cierre la app.
       if (window.photoBlobStore) {
         try {
           await window.photoBlobStore.put(id, dataUrl);
         } catch (err) {
           console.error("[applyQueuedPhotoLocally] no se pudo guardar la foto en IndexedDB:", err);
+          alert("Esta foto se ve bien por ahora, pero no se pudo guardar de forma permanente (posiblemente el celular se quedó sin espacio de almacenamiento libre). Si cierras la app antes de generar el informe, es posible que se pierda. Revisa el espacio disponible en el dispositivo.");
         }
       }
       const photo = {
@@ -1103,11 +1106,12 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
     document.getElementById("damagePhotoCameraBtn").addEventListener("click", () => document.getElementById("damagePhotoCameraInput").click());
     document.getElementById("damagePhotoGalleryBtn").addEventListener("click", () => document.getElementById("damagePhotoGalleryInput").click());
     function onDamagePhotoInputChange(e) {
-      const file = e.target.files[0];
-      if (!file) return;
-      damageModalPendingPhotos.push(file);
-      renderDamagePhotosPreview();
-      e.target.value = ""; // permite volver a elegir el mismo archivo si se quita de la lista de pendientes
+      // La galería permite elegir varias fotos a la vez (atributo `multiple`
+      // en damagePhotoGalleryInput); la cámara sigue devolviendo una sola
+      // por captura, pero el mismo bucle sirve para ambas sin distinguirlas.
+      for (const file of e.target.files) damageModalPendingPhotos.push(file);
+      if (e.target.files.length) renderDamagePhotosPreview();
+      e.target.value = ""; // permite volver a elegir el(los) mismo(s) archivo(s) si se quita de la lista de pendientes
     }
     document.getElementById("damagePhotoCameraInput").addEventListener("change", onDamagePhotoInputChange);
     document.getElementById("damagePhotoGalleryInput").addEventListener("change", onDamagePhotoInputChange);
@@ -1226,23 +1230,35 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
       );
       container.querySelectorAll(".photo-input-camera, .photo-input-gallery").forEach((input) =>
         input.addEventListener("change", async (e) => {
-          const file = e.target.files[0];
-          if (!file) return;
+          // La galería permite elegir varias fotos a la vez (atributo
+          // `multiple` en photoUploadControl, app.js) -- se suben una por
+          // una (uploadPhoto no admite lotes) pero solo se recarga/redibuja
+          // el paso UNA vez al final, no por cada foto. Si alguna falla
+          // (p.ej. una foto solo en la nube, sin descargar al dispositivo)
+          // no se detiene el resto del lote -- se avisa junto al final cuáles
+          // no se pudieron guardar.
+          const files = Array.from(e.target.files || []);
+          if (!files.length) return;
           const kind = input.dataset.sketch === "PLANTA" ? "ESQUEMA_PLANTA" : "ESQUEMA_ELEVACION";
+          const failed = [];
+          for (const file of files) {
+            try {
+              const photoRes = await uploadPhoto(inspectionId, file, { kind });
+              if (photoRes?.queued) await applyQueuedPhotoLocally(file, { kind });
+            } catch (err) {
+              // Ver el mismo manejo (y su explicación) en el envío del modal de daño (paso 5).
+              const reason = /no se pudo leer la imagen/i.test(err.message || "")
+                ? "no se pudo leer sin conexión (¿solo en la copia de seguridad en la nube?)"
+                : err.message;
+              failed.push(`${file.name}: ${reason}`);
+            }
+          }
           try {
-            const photoRes = await uploadPhoto(inspectionId, file, { kind });
-            if (photoRes?.queued) await applyQueuedPhotoLocally(file, { kind });
             await loadAll();
             renderStep6(container);
-          } catch (err) {
-            // Ver el mismo manejo (y su explicación) en el envío del modal de daño (paso 5).
-            if (/no se pudo leer la imagen/i.test(err.message || "")) {
-              alert("No se pudo leer esa foto sin conexión. Es posible que esa imagen esté solo en la copia de seguridad en la nube (p.ej. Google Fotos) y no descargada en el celular todavía. Prueba con \"📷 Tomar foto\" en su lugar, o abre esa foto una vez en tu app de galería (con señal) para que se descargue al dispositivo antes de intentarlo de nuevo.");
-            } else {
-              alert("No se pudo guardar la foto: " + err.message);
-            }
           } finally {
-            e.target.value = ""; // permite volver a elegir el mismo archivo si el intento anterior falló
+            e.target.value = ""; // permite volver a elegir el(los) mismo(s) archivo(s)
+            if (failed.length) alert(`No se pudieron guardar ${failed.length} de ${files.length} foto(s):\n` + failed.join("\n"));
           }
         }),
       );

@@ -262,7 +262,7 @@ function photoUploadControl(dataAttrs, label = "Agregar foto") {
       </button>
     </div>
     <input type="file" accept="image/*" capture="environment" class="hidden photo-input-camera" ${attrs} />
-    <input type="file" accept="image/*" class="hidden photo-input-gallery" ${attrs} />
+    <input type="file" accept="image/*" multiple class="hidden photo-input-gallery" ${attrs} />
   `;
 }
 
