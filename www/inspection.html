@@ -396,6 +396,7 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
       evaluatorIdCode: "evaluator_id_code", evaluatorDocType: "evaluator_doc_type", evaluatorDocNumber: "evaluator_doc_number",
       evaluatorEntity: "evaluator_entity", evaluatorDependencia: "evaluator_dependencia",
       responsibleOfficialName: "responsible_official_name", responsibleOfficialCc: "responsible_official_cc", responsibleOfficialEntity: "responsible_official_entity",
+      inspectorSignature: "inspector_signature", occupantSignature: "occupant_signature",
     };
     const INSPECTION_BOOL_INT_FIELDS = new Set(["waterBodyThreat", "weakStory", "shortColumn", "stiffnessChange", "previousEvaluationExists", "classificationOverridden"]);
     function applyInspectionPatchLocally(fields) {
@@ -1377,6 +1378,95 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
       const photoCount = (i.photos || []).length + (i.damageRecords || []).reduce((a, d) => a + (d.photos?.length || 0), 0);
       return { checks, missing, damageCount, photoCount };
     }
+
+    // ===========================================================================
+    // Firmas (paso 8) -- captura con el dedo/mouse sobre un <canvas>, se guarda
+    // como dataURL PNG (imagen del trazo) junto con el resto del paso. No usa
+    // `formPayload()` (que solo lee <input>/<select>/<textarea> con `name`)
+    // porque un canvas no es un campo de formulario -- se maneja aparte (ver
+    // saveStep8) y solo se incluye en el guardado si el usuario de verdad
+    // interactuó con ese lienzo en esta visita, para no pisar una firma ya
+    // guardada con un lienzo en blanco que nunca se tocó.
+    // ===========================================================================
+    const signaturePads = {}; // { inspector: pad, occupant: pad } -- se reasignan cada vez que se renderiza el paso 8
+    function initSignaturePad(canvas, existingDataUrl) {
+      const ctx = canvas.getContext("2d");
+      // Resolución real del lienzo = tamaño en pantalla * densidad de
+      // píxeles del dispositivo, para que el trazo no se vea borroso en
+      // pantallas de alta densidad (la mayoría de celulares) -- luego se
+      // escala el contexto para poder seguir dibujando en coordenadas CSS.
+      const ratio = window.devicePixelRatio || 1;
+      const cssWidth = canvas.clientWidth || 300;
+      const cssHeight = canvas.clientHeight || 128;
+      canvas.width = cssWidth * ratio;
+      canvas.height = cssHeight * ratio;
+      ctx.scale(ratio, ratio);
+      ctx.lineWidth = 2.2;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.strokeStyle = "#0f172a";
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, cssWidth, cssHeight);
+
+      if (existingDataUrl) {
+        const img = new Image();
+        img.onload = () => ctx.drawImage(img, 0, 0, cssWidth, cssHeight);
+        img.src = existingDataUrl;
+      }
+
+      const pad = { dirty: false, drawing: false, lastX: 0, lastY: 0 };
+      function pos(e) {
+        const rect = canvas.getBoundingClientRect();
+        return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+      }
+      function start(e) {
+        e.preventDefault();
+        pad.drawing = true;
+        const p = pos(e);
+        pad.lastX = p.x;
+        pad.lastY = p.y;
+        canvas.setPointerCapture?.(e.pointerId);
+      }
+      function move(e) {
+        if (!pad.drawing) return;
+        e.preventDefault();
+        const p = pos(e);
+        ctx.beginPath();
+        ctx.moveTo(pad.lastX, pad.lastY);
+        ctx.lineTo(p.x, p.y);
+        ctx.stroke();
+        pad.lastX = p.x;
+        pad.lastY = p.y;
+        pad.dirty = true;
+      }
+      function end() {
+        pad.drawing = false;
+      }
+      // Pointer events unifican mouse/touch/lápiz en un solo set de eventos
+      // -- funciona igual con el dedo en el celular que con mouse en escritorio.
+      canvas.addEventListener("pointerdown", start);
+      canvas.addEventListener("pointermove", move);
+      canvas.addEventListener("pointerup", end);
+      canvas.addEventListener("pointerleave", end);
+      canvas.addEventListener("pointercancel", end);
+
+      pad.clear = () => {
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, cssWidth, cssHeight);
+        pad.dirty = true;
+      };
+      /** Compara pixel a pixel contra un lienzo en blanco -- evita guardar una "firma" vacía si el usuario tocó el lienzo sin llegar a dibujar nada. */
+      pad.isBlank = () => {
+        const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+        for (let i = 0; i < data.length; i += 4) {
+          if (data[i] !== 255 || data[i + 1] !== 255 || data[i + 2] !== 255) return false;
+        }
+        return true;
+      };
+      pad.toDataUrl = () => canvas.toDataURL("image/png");
+      return pad;
+    }
+
     function renderStep8(container) {
       const i = inspection;
       const c = computeCompleteness(i);
@@ -1399,6 +1489,20 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
           </div>
           ${field("Entidad", `<input name="responsibleOfficialEntity" class="field-input" value="${escapeHtml(i.responsible_official_entity || "")}" />`)}
         `)}
+        ${sectionCard("Firmas", `
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <div class="text-sm font-medium text-slate-700 mb-1.5">Firma del evaluador</div>
+              <canvas id="inspectorSignatureCanvas" class="w-full h-32 rounded-xl border-2 border-slate-300 bg-white touch-none"></canvas>
+              <button type="button" id="clearInspectorSignatureBtn" class="chip-btn border-2 border-slate-400 bg-white text-slate-800 mt-2 !min-h-[32px] text-xs">🗑️ Borrar firma</button>
+            </div>
+            <div>
+              <div class="text-sm font-medium text-slate-700 mb-1.5">Firma del propietario/ocupante</div>
+              <canvas id="occupantSignatureCanvas" class="w-full h-32 rounded-xl border-2 border-slate-300 bg-white touch-none"></canvas>
+              <button type="button" id="clearOccupantSignatureBtn" class="chip-btn border-2 border-slate-400 bg-white text-slate-800 mt-2 !min-h-[32px] text-xs">🗑️ Borrar firma</button>
+            </div>
+          </div>
+        `, "Firma con el dedo directamente sobre el recuadro. Queda incluida en el informe PDF y en el formato oficial.")}
       </form>
       ${sectionCard("Resumen de la inspección", `
         <div class="flex flex-wrap items-center gap-3 mb-4">
@@ -1427,6 +1531,11 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
       `)}`;
       bindChipRadio(container);
 
+      signaturePads.inspector = initSignaturePad(document.getElementById("inspectorSignatureCanvas"), i.inspector_signature);
+      signaturePads.occupant = initSignaturePad(document.getElementById("occupantSignatureCanvas"), i.occupant_signature);
+      document.getElementById("clearInspectorSignatureBtn").addEventListener("click", () => signaturePads.inspector.clear());
+      document.getElementById("clearOccupantSignatureBtn").addEventListener("click", () => signaturePads.occupant.clear());
+
       document.getElementById("reportBtn").addEventListener("click", async () => {
         await saveStep8();
         window.open(`/api/inspections/${inspectionId}/report.pdf`, "_blank");
@@ -1443,6 +1552,17 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
     async function saveStep8() {
       const payload = formPayload();
       payload.evaluatorDocType = chipRadioValue(document, "evaluatorDocType");
+      // Firmas: solo se incluyen en el payload si el usuario de verdad tocó
+      // ese lienzo en esta visita al paso (dibujó algo o lo borró a
+      // propósito) -- así, si el evaluador pasa por el paso 8 sin volver a
+      // firmar, no se pisa una firma ya guardada con un lienzo en blanco que
+      // nunca se tocó.
+      if (signaturePads.inspector?.dirty) {
+        payload.inspectorSignature = signaturePads.inspector.isBlank() ? "" : signaturePads.inspector.toDataUrl();
+      }
+      if (signaturePads.occupant?.dirty) {
+        payload.occupantSignature = signaturePads.occupant.isBlank() ? "" : signaturePads.occupant.toDataUrl();
+      }
       await patchInspection(payload);
     }
 
