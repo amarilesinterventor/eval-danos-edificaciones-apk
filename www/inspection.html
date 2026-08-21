@@ -95,6 +95,26 @@
     </div>
   </div>
 
+  <!-- Modal: pad de firma (evaluador / propietario-ocupante) -- pantalla dedicada, sin
+       el resto de la página alrededor, para que arrastrar el dedo sobre el lienzo no
+       compita con el scroll de la página (bug real reportado en campo: al firmar en el
+       recuadro dentro de la propia pantalla del paso 8, el dedo "navegaba" la página en
+       vez de dibujar). -->
+  <div id="signatureModal" class="fixed inset-0 bg-black/40 hidden items-center justify-center p-4 z-40 overscroll-none">
+    <div class="bg-white rounded-2xl shadow-xl w-full max-w-lg p-5 overscroll-none">
+      <h2 id="signatureModalTitle" class="text-lg font-semibold text-slate-800 mb-3">Firma</h2>
+      <canvas id="signatureModalCanvas" class="w-full h-56 rounded-xl border-2 border-slate-300 bg-white touch-none" style="touch-action: none;"></canvas>
+      <p class="text-xs text-slate-400 mt-2">Firma con el dedo directamente sobre el recuadro.</p>
+      <div class="flex justify-between gap-2 mt-4">
+        <button type="button" id="signatureModalClearBtn" class="btn-secondary">🗑️ Borrar</button>
+        <div class="flex gap-2">
+          <button type="button" id="signatureModalCancelBtn" class="btn-secondary">Cancelar</button>
+          <button type="button" id="signatureModalSaveBtn" class="btn-primary">Guardar firma</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script src="/native-shim.js"></script>
   <script src="/offline.js"></script>
   <script src="/local-index.js"></script>
@@ -1385,10 +1405,67 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
     // `formPayload()` (que solo lee <input>/<select>/<textarea> con `name`)
     // porque un canvas no es un campo de formulario -- se maneja aparte (ver
     // saveStep8) y solo se incluye en el guardado si el usuario de verdad
-    // interactuó con ese lienzo en esta visita, para no pisar una firma ya
-    // guardada con un lienzo en blanco que nunca se tocó.
+    // interactuó con esa firma en esta visita, para no pisar una firma ya
+    // guardada sin haberla vuelto a tocar.
+    //
+    // El lienzo vive en un MODAL dedicado (signatureModal), no embebido en la
+    // propia pantalla del paso 8 -- bug real reportado en campo: con el
+    // lienzo dentro del flujo normal (scrolleable) de la página, arrastrar el
+    // dedo para firmar competía con el gesto de scroll del navegador/WebView
+    // y terminaba "navegando" la página en vez de dibujar, incluso con
+    // `touch-action: none` puesto. Un modal fijo, sin nada scrolleable
+    // alrededor del lienzo, le quita esa ambigüedad al gesto por completo.
+    // `signatureState` guarda el resultado (dataURL + si se tocó en esta
+    // visita) independiente del lienzo, que solo existe mientras el modal
+    // está abierto -- se re-crea cada vez que se abre.
     // ===========================================================================
-    const signaturePads = {}; // { inspector: pad, occupant: pad } -- se reasignan cada vez que se renderiza el paso 8
+    let signatureState = { inspector: { dataUrl: null, dirty: false }, occupant: { dataUrl: null, dirty: false } };
+    let currentSignatureTarget = null; // "inspector" | "occupant" -- cuál está editando el modal ahora mismo
+    let currentSignaturePad = null;
+    const SIGNATURE_LABELS = { inspector: "Firma del evaluador", occupant: "Firma del propietario/ocupante" };
+
+    function openSignatureModal(which) {
+      currentSignatureTarget = which;
+      document.getElementById("signatureModalTitle").textContent = SIGNATURE_LABELS[which];
+      const modal = document.getElementById("signatureModal");
+      openModal(modal);
+      // El lienzo se inicializa DESPUÉS de mostrar el modal (no antes): su
+      // tamaño real en pantalla (clientWidth/clientHeight) todavía sería 0
+      // mientras el modal tiene `hidden`/`display:none`, y initSignaturePad
+      // necesita esas medidas para fijar la resolución del lienzo.
+      const canvas = document.getElementById("signatureModalCanvas");
+      currentSignaturePad = initSignaturePad(canvas, signatureState[which].dataUrl);
+    }
+    function closeSignatureModal() {
+      closeModal(document.getElementById("signatureModal"));
+      currentSignatureTarget = null;
+      currentSignaturePad = null;
+    }
+    document.getElementById("signatureModalClearBtn").addEventListener("click", () => currentSignaturePad?.clear());
+    document.getElementById("signatureModalCancelBtn").addEventListener("click", () => closeSignatureModal());
+    document.getElementById("signatureModalSaveBtn").addEventListener("click", () => {
+      if (!currentSignatureTarget || !currentSignaturePad) return;
+      signatureState[currentSignatureTarget] = {
+        dataUrl: currentSignaturePad.isBlank() ? null : currentSignaturePad.toDataUrl(),
+        dirty: true,
+      };
+      renderSignaturePreviews();
+      closeSignatureModal();
+    });
+    /** Redibuja las dos miniaturas/botones de firma dentro del paso 8 según signatureState -- se llama al renderizar el paso y cada vez que se guarda una firma en el modal. */
+    function renderSignaturePreviews() {
+      for (const which of ["inspector", "occupant"]) {
+        const el = document.getElementById(`${which}SignaturePreview`);
+        if (!el) continue; // el paso 8 no está montado (p.ej. se guardó una firma pero ya se navegó a otro paso) -- no debería pasar, pero no debe romper
+        const dataUrl = signatureState[which].dataUrl;
+        el.innerHTML = dataUrl
+          ? `<img src="${dataUrl}" alt="${SIGNATURE_LABELS[which]}" class="h-20 mx-auto object-contain" />`
+          : `<span class="text-xs text-slate-400">Sin firmar</span>`;
+        const btn = document.getElementById(`${which}SignatureBtn`);
+        if (btn) btn.textContent = dataUrl ? "✏️ Editar firma" : "✍️ Firmar";
+      }
+    }
+
     function initSignaturePad(canvas, existingDataUrl) {
       const ctx = canvas.getContext("2d");
       // Resolución real del lienzo = tamaño en pantalla * densidad de
@@ -1493,16 +1570,16 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <div class="text-sm font-medium text-slate-700 mb-1.5">Firma del evaluador</div>
-              <canvas id="inspectorSignatureCanvas" class="w-full h-32 rounded-xl border-2 border-slate-300 bg-white touch-none"></canvas>
-              <button type="button" id="clearInspectorSignatureBtn" class="chip-btn border-2 border-slate-400 bg-white text-slate-800 mt-2 !min-h-[32px] text-xs">🗑️ Borrar firma</button>
+              <div id="inspectorSignaturePreview" class="w-full h-24 rounded-xl border-2 border-slate-300 bg-white flex items-center justify-center"></div>
+              <button type="button" id="inspectorSignatureBtn" class="chip-btn border-2 border-brand-600 bg-white text-brand-700 mt-2 w-full">✍️ Firmar</button>
             </div>
             <div>
               <div class="text-sm font-medium text-slate-700 mb-1.5">Firma del propietario/ocupante</div>
-              <canvas id="occupantSignatureCanvas" class="w-full h-32 rounded-xl border-2 border-slate-300 bg-white touch-none"></canvas>
-              <button type="button" id="clearOccupantSignatureBtn" class="chip-btn border-2 border-slate-400 bg-white text-slate-800 mt-2 !min-h-[32px] text-xs">🗑️ Borrar firma</button>
+              <div id="occupantSignaturePreview" class="w-full h-24 rounded-xl border-2 border-slate-300 bg-white flex items-center justify-center"></div>
+              <button type="button" id="occupantSignatureBtn" class="chip-btn border-2 border-brand-600 bg-white text-brand-700 mt-2 w-full">✍️ Firmar</button>
             </div>
           </div>
-        `, "Firma con el dedo directamente sobre el recuadro. Queda incluida en el informe PDF y en el formato oficial.")}
+        `, "Toca \"Firmar\" para abrir la pantalla de firma con el dedo. Queda incluida en el informe PDF y en el formato oficial.")}
       </form>
       ${sectionCard("Resumen de la inspección", `
         <div class="flex flex-wrap items-center gap-3 mb-4">
@@ -1531,10 +1608,17 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
       `)}`;
       bindChipRadio(container);
 
-      signaturePads.inspector = initSignaturePad(document.getElementById("inspectorSignatureCanvas"), i.inspector_signature);
-      signaturePads.occupant = initSignaturePad(document.getElementById("occupantSignatureCanvas"), i.occupant_signature);
-      document.getElementById("clearInspectorSignatureBtn").addEventListener("click", () => signaturePads.inspector.clear());
-      document.getElementById("clearOccupantSignatureBtn").addEventListener("click", () => signaturePads.occupant.clear());
+      // Estado de firmas: se recarga desde la inspección cada vez que se
+      // entra al paso 8 (no se pisa nada tocado en una visita anterior a
+      // este mismo render, ya que renderStep8 reemplaza todo el HTML del
+      // paso de cero cada vez que se llama).
+      signatureState = {
+        inspector: { dataUrl: i.inspector_signature || null, dirty: false },
+        occupant: { dataUrl: i.occupant_signature || null, dirty: false },
+      };
+      renderSignaturePreviews();
+      document.getElementById("inspectorSignatureBtn").addEventListener("click", () => openSignatureModal("inspector"));
+      document.getElementById("occupantSignatureBtn").addEventListener("click", () => openSignatureModal("occupant"));
 
       document.getElementById("reportBtn").addEventListener("click", async () => {
         await saveStep8();
@@ -1557,11 +1641,11 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
       // propósito) -- así, si el evaluador pasa por el paso 8 sin volver a
       // firmar, no se pisa una firma ya guardada con un lienzo en blanco que
       // nunca se tocó.
-      if (signaturePads.inspector?.dirty) {
-        payload.inspectorSignature = signaturePads.inspector.isBlank() ? "" : signaturePads.inspector.toDataUrl();
+      if (signatureState.inspector.dirty) {
+        payload.inspectorSignature = signatureState.inspector.dataUrl || "";
       }
-      if (signaturePads.occupant?.dirty) {
-        payload.occupantSignature = signaturePads.occupant.isBlank() ? "" : signaturePads.occupant.toDataUrl();
+      if (signatureState.occupant.dirty) {
+        payload.occupantSignature = signatureState.occupant.dataUrl || "";
       }
       await patchInspection(payload);
     }
