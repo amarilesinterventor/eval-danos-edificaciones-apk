@@ -1482,9 +1482,15 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
       ctx.strokeStyle = "#0f172a";
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, cssWidth, cssHeight);
-
+      // Sin relleno de fondo -- el lienzo arranca transparente (comportamiento
+      // por defecto), a propósito: el PNG exportado (toDataURL) guarda solo el
+      // trazo, sin ningún rectángulo blanco opaco detrás. Así, incrustada en
+      // el PDF, la firma queda como tinta directamente sobre la línea/el
+      // papel, en vez de una placa blanca superpuesta -- más parecida a una
+      // firma real hecha a mano, y más difícil de reutilizar/recortar de
+      // forma convincente en otro documento. El fondo blanco que SÍ se ve
+      // mientras se firma es solo CSS (`bg-white` en el propio <canvas>), no
+      // forma parte de los píxeles que se exportan.
       if (existingDataUrl) {
         const img = new Image();
         img.onload = () => ctx.drawImage(img, 0, 0, cssWidth, cssHeight);
@@ -1528,15 +1534,14 @@ const BLANK_INSPECTION_STUB = () => ({ id: inspectionId, elementDamages: [], dam
       canvas.addEventListener("pointercancel", end);
 
       pad.clear = () => {
-        ctx.fillStyle = "#ffffff";
-        ctx.fillRect(0, 0, cssWidth, cssHeight);
+        ctx.clearRect(0, 0, cssWidth, cssHeight); // vuelve a transparente, no a blanco -- ver nota de fondo transparente arriba
         pad.dirty = true;
       };
-      /** Compara pixel a pixel contra un lienzo en blanco -- evita guardar una "firma" vacía si el usuario tocó el lienzo sin llegar a dibujar nada. */
+      /** Revisa el canal alfa -- un trazo dibujado es opaco, el fondo (sin relleno) queda transparente; evita guardar una "firma" vacía si el usuario tocó el lienzo sin llegar a dibujar nada. */
       pad.isBlank = () => {
         const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-        for (let i = 0; i < data.length; i += 4) {
-          if (data[i] !== 255 || data[i + 1] !== 255 || data[i + 2] !== 255) return false;
+        for (let i = 3; i < data.length; i += 4) {
+          if (data[i] !== 0) return false; // algún píxel no transparente -- sí hay trazo
         }
         return true;
       };
